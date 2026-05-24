@@ -20,6 +20,7 @@ async def search_literature(
     config: SearchConfig | None = None,
     store: SQLiteStore | None = None,
     session_id: str | None = None,
+    persist_citations: bool = True,
     source_searchers: dict[str, SearchCallable] | None = None,
 ) -> ToolResult:
     cfg = config or SearchConfig(max_results=5)
@@ -75,7 +76,7 @@ async def search_literature(
             _merge_source_result(source, result, documents, errors)
 
     deduped = dedupe_documents(documents)[:limit]
-    if store is not None:
+    if store is not None and persist_citations:
         await _persist_citations(store, deduped, session_id=session_id)
 
     status = ToolStatus.OK
@@ -168,17 +169,7 @@ async def _persist_citations(
     *,
     session_id: str | None,
 ) -> None:
-    for document in documents:
-        citation = document.citation
-        await store.add_citation(
-            session_id=session_id,
-            source=citation.source,
-            title=citation.title,
-            url=citation.url,
-            doi=citation.doi,
-            pmid=citation.pmid,
-            arxiv_id=citation.arxiv_id,
-            semantic_scholar_id=citation.semantic_scholar_id,
-            year=citation.year,
-            raw_json=citation.raw_json,
-        )
+    await store.add_citations_batch(
+        [document.citation for document in documents],
+        session_id=session_id,
+    )

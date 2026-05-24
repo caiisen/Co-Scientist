@@ -84,6 +84,8 @@ class TaskQueue:
                 self._in_progress_ids.discard(task_id)
                 self._queue.task_done()
                 return
+            if task_id in self._completed_queued_ids:
+                return
             if task_id in self._queued_ids:
                 self._completed_queued_ids.add(task_id)
                 self._queue.task_done()

@@ -28,6 +28,42 @@ def test_parse_arxiv_feed() -> None:
 
 
 @pytest.mark.asyncio
+async def test_arxiv_fetch_uses_shared_session() -> None:
+    class FakeResponse:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        async def text(self) -> str:
+            return ARXIV_XML
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get(self, url: str, *, params: dict):
+            self.calls.append((url, params))
+            return FakeResponse()
+
+    session = FakeSession()
+
+    xml_text = await arxiv._fetch_text(
+        "https://example.test/arxiv",
+        {"search_query": "all:AML"},
+        10,
+        session=session,
+    )
+
+    assert xml_text == ARXIV_XML
+    assert session.calls == [("https://example.test/arxiv", {"search_query": "all:AML"})]
+
+
+@pytest.mark.asyncio
 async def test_arxiv_search_uses_injected_fetcher() -> None:
     async def fetch_text(url: str, params: dict, timeout_seconds: int) -> str:
         assert params["max_results"] == 1

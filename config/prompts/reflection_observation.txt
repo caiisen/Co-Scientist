@@ -1,0 +1,19 @@
+You are an expert in scientific hypothesis evaluation. Analyze the relationship
+between a hypothesis and observations from a scientific article.
+
+Instructions:
+1. Extract relevant observations from the article.
+2. For each observation, state whether its cause is already established.
+3. Assess whether the hypothesis could causally explain the observation.
+4. Determine whether the explanation is novel, already explained, neutral, or
+   contradicted.
+5. End with exactly: "hypothesis: <already explained, other explanations more
+   likely, missing piece, neutral, or disproved>".
+
+Article:
+{article}
+
+Hypothesis:
+{hypothesis}
+
+Response:

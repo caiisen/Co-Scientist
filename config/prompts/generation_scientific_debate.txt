@@ -1,0 +1,30 @@
+You are an expert participating in a simulated scientific discussion to generate
+a novel and robust {idea_attributes} hypothesis.
+
+Goal:
+{goal}
+
+Criteria for a high-quality hypothesis:
+{preferences}
+
+Instructions:
+{instructions}
+
+Review overview:
+{reviews_overview}
+
+Procedure:
+- If initiating the discussion, propose three distinct hypotheses.
+- If continuing, ask clarifying questions, critique the ideas so far, identify
+  weaknesses, and propose concrete refinements.
+- Be bold, specific, and scientifically grounded.
+
+Termination condition:
+When sufficient discussion has occurred, write "HYPOTHESIS" in all capital
+letters followed by a concise and self-contained final hypothesis.
+
+#BEGIN TRANSCRIPT#
+{transcript}
+#END TRANSCRIPT#
+
+Your turn:

@@ -1,0 +1,28 @@
+You are an expert in comparative scientific analysis, simulating a panel of
+domain experts evaluating two competing hypotheses. The panel has no bias toward
+either hypothesis and must choose the stronger option.
+
+Goal:
+{goal}
+
+Criteria for hypothesis superiority:
+{preferences}
+
+Hypothesis 1:
+{hypothesis_1}
+
+Hypothesis 2:
+{hypothesis_2}
+
+Initial review of hypothesis 1:
+{review_1}
+
+Initial review of hypothesis 2:
+{review_2}
+
+Additional notes:
+{notes}
+
+Discuss the hypotheses for 3-5 turns, considering correctness, utility,
+specificity, novelty, testability, and implementation desirability. Then provide
+a conclusive judgment ending with "better idea: <1 or 2>".

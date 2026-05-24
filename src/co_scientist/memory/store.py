@@ -4,7 +4,7 @@ import json
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import aiosqlite
 
@@ -20,6 +20,9 @@ from co_scientist.memory.models import (
     TaskStatus,
     utc_now,
 )
+
+if TYPE_CHECKING:
+    from co_scientist.tools.models import Citation
 
 SCHEMA_PATH = Path(__file__).with_name("schema.sql")
 
@@ -301,13 +304,16 @@ class SQLiteStore:
             raise ValueError("winner_id must be hypo_a_id or hypo_b_id")
 
         async with self.db.execute(
-            "SELECT id, elo FROM hypotheses WHERE id IN (?, ?)",
+            "SELECT id, session_id, elo FROM hypotheses WHERE id IN (?, ?)",
             (match.hypo_a_id, match.hypo_b_id),
         ) as cursor:
             rows = await cursor.fetchall()
         ratings = {row["id"]: row["elo"] for row in rows}
         if set(ratings) != {match.hypo_a_id, match.hypo_b_id}:
             raise KeyError("match references unknown hypothesis")
+        hypothesis_sessions = {row["session_id"] for row in rows}
+        if hypothesis_sessions != {match.session_id}:
+            raise ValueError("match hypotheses must belong to match session")
 
         loser_id = match.hypo_b_id if match.winner_id == match.hypo_a_id else match.hypo_a_id
         new_winner, new_loser = update_elo(ratings[match.winner_id], ratings[loser_id], k=k)
@@ -409,6 +415,43 @@ class SQLiteStore:
         )
         await self.db.commit()
         return int(cursor.lastrowid)
+
+    async def add_citations_batch(
+        self,
+        citations: list[Citation],
+        *,
+        session_id: str | None = None,
+    ) -> int:
+        if not citations:
+            return 0
+        now = _dt_text(utc_now())
+        await self.db.executemany(
+            """
+            INSERT INTO citations (
+              session_id, source, title, url, doi, pmid, arxiv_id,
+              semantic_scholar_id, year, raw_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    session_id,
+                    citation.source,
+                    citation.title,
+                    citation.url,
+                    citation.doi,
+                    citation.pmid,
+                    citation.arxiv_id,
+                    citation.semantic_scholar_id,
+                    citation.year,
+                    _json_dumps(citation.raw_json),
+                    now,
+                )
+                for citation in citations
+            ],
+        )
+        await self.db.commit()
+        return len(citations)
 
     async def set_tool_cache(
         self,

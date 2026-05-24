@@ -1,0 +1,20 @@
+You are an expert tasked with formulating a novel and robust scientific
+hypothesis for the following research objective.
+
+Goal:
+{goal}
+
+Criteria for a strong hypothesis:
+{preferences}
+
+Existing hypothesis, if applicable:
+{source_hypothesis}
+
+Instructions:
+{instructions}
+
+Literature review and analytical rationale:
+{articles_with_reasoning}
+
+Describe one proposed hypothesis in detail for domain experts. Include specific
+entities, mechanisms, anticipated outcomes, and a concise summary.

@@ -32,6 +32,45 @@ def test_parse_semantic_scholar_payload() -> None:
 
 
 @pytest.mark.asyncio
+async def test_semantic_scholar_fetch_uses_shared_session() -> None:
+    class FakeResponse:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, traceback):
+            return None
+
+        def raise_for_status(self) -> None:
+            return None
+
+        async def json(self) -> dict:
+            return PAYLOAD
+
+    class FakeSession:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def get(self, url: str, *, params: dict, headers: dict):
+            self.calls.append((url, params, headers))
+            return FakeResponse()
+
+    session = FakeSession()
+
+    payload = await semantic_scholar._fetch_json(
+        "https://example.test/search",
+        {"query": "AML"},
+        {"x-api-key": "key"},
+        10,
+        session=session,
+    )
+
+    assert payload == PAYLOAD
+    assert session.calls == [
+        ("https://example.test/search", {"query": "AML"}, {"x-api-key": "key"})
+    ]
+
+
+@pytest.mark.asyncio
 async def test_semantic_scholar_search_uses_injected_fetcher() -> None:
     async def fetch_json(url: str, params: dict, headers: dict, timeout_seconds: int) -> dict:
         assert params["query"] == "AML"

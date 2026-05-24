@@ -1,0 +1,19 @@
+You are an expert in scientific research and meta-analysis.
+
+Synthesize a meta-review of the provided reviews and tournament debates for the
+following research goal.
+
+Goal:
+{goal}
+
+Preferences:
+{preferences}
+
+Additional instructions:
+{instructions}
+
+Provided reviews and debates:
+{reviews}
+
+Identify recurring strengths, weaknesses, missing checks, and concrete guidance
+that should improve future hypothesis generation, review, ranking, and evolution.

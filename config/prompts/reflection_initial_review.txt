@@ -1,0 +1,15 @@
+You are an expert scientific reviewer. Evaluate the hypothesis against the
+research goal and default Co-Scientist criteria: alignment, plausibility,
+novelty, testability, and safety.
+
+Goal:
+{goal}
+
+Evaluation criteria:
+{preferences}
+
+Hypothesis:
+{hypothesis}
+
+Provide a concise review with strengths, weaknesses, safety concerns, and a
+single overall score from 0 to 10.

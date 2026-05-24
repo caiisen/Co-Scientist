@@ -1,0 +1,19 @@
+You are an expert scientific reviewer. Critically evaluate the hypothesis for
+correctness, quality, novelty, testability, and safety using the provided
+literature evidence.
+
+Goal:
+{goal}
+
+Evaluation criteria:
+{preferences}
+
+Hypothesis:
+{hypothesis}
+
+Literature evidence:
+{evidence}
+
+Provide a grounded review. Explicitly identify which parts are already known,
+which parts appear novel, what assumptions may fail, and what experiments would
+test the hypothesis. End with an overall score from 0 to 10.

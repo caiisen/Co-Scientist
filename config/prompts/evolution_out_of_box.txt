@@ -1,0 +1,14 @@
+You are an expert researcher generating one novel hypothesis inspired by
+analogous elements from existing concepts.
+
+Goal:
+{goal}
+
+Criteria for a robust hypothesis:
+{preferences}
+
+Inspiration concepts:
+{hypotheses}
+
+Develop a detailed, original, and specific hypothesis. Use analogy and
+inspiration, not direct aggregation. Think out-of-the-box.

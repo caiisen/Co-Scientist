@@ -89,6 +89,38 @@ async def test_search_literature_aggregates_partial_failures_and_persists_citati
 
 
 @pytest.mark.asyncio
+async def test_search_literature_can_defer_citation_persistence(tmp_path: Path) -> None:
+    async def pubmed_search(query: str, *, max_results: int):
+        return ToolResult.from_documents(
+            source="pubmed",
+            documents=[document("pubmed", "PubMed paper", pmid="123")],
+        )
+
+    async with SQLiteStore(tmp_path / "literature_defer.sqlite") as store:
+        session = await store.create_session("goal")
+        result = await search_literature(
+            "AML",
+            config=SearchConfig(
+                max_results=5,
+                semantic_scholar_enabled=False,
+                tavily_enabled=False,
+            ),
+            store=store,
+            session_id=session.id,
+            persist_citations=False,
+            source_searchers={"pubmed": pubmed_search},
+        )
+        async with store.db.execute(
+            "SELECT COUNT(*) AS count FROM citations WHERE session_id = ?",
+            (session.id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+    assert result.status == ToolStatus.OK
+    assert row["count"] == 0
+
+
+@pytest.mark.asyncio
 async def test_search_literature_runs_cache_misses_concurrently() -> None:
     active = 0
     all_running = asyncio.Event()

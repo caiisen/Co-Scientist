@@ -142,3 +142,42 @@ async def test_task_done_waits_for_terminal_state(tmp_path: Path) -> None:
         assert running.id is not None
         await queue.mark_done(running.id)
         await asyncio.wait_for(queue._queue.join(), timeout=0.1)
+
+
+@pytest.mark.asyncio
+async def test_mark_terminal_state_before_dequeue_keeps_join_accounting(
+    tmp_path: Path,
+) -> None:
+    async with SQLiteStore(tmp_path / "queue_predequeue_terminal.sqlite") as store:
+        session = await store.create_session("predequeue terminal")
+        queue = TaskQueue(store, session.id)
+        done = await queue.enqueue(
+            Task(
+                session_id=session.id,
+                agent="reflection",
+                action="review",
+                priority=int(TaskPriority.REFLECTION),
+            )
+        )
+        failed = await queue.enqueue(
+            Task(
+                session_id=session.id,
+                agent="ranking",
+                action="match",
+                priority=int(TaskPriority.RANKING),
+            )
+        )
+        assert done.id is not None
+        assert failed.id is not None
+
+        await queue.mark_done(done.id)
+        await queue.mark_failed(failed.id, "cancelled externally")
+
+        await asyncio.wait_for(queue._queue.join(), timeout=0.1)
+
+        loaded_done = await store.get_task(done.id)
+        loaded_failed = await store.get_task(failed.id)
+        assert loaded_done is not None
+        assert loaded_failed is not None
+        assert loaded_done.status == TaskStatus.DONE
+        assert loaded_failed.status == TaskStatus.FAILED

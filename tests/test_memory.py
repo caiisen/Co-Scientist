@@ -14,6 +14,7 @@ from co_scientist.memory import (
     TaskPriority,
     TaskStatus,
 )
+from co_scientist.tools.models import Citation
 
 
 @pytest.mark.asyncio
@@ -159,6 +160,56 @@ async def test_add_match_rejects_unknown_hypothesis(tmp_path: Path) -> None:
                     transcript="Missing opponent.",
                 )
             )
+
+
+@pytest.mark.asyncio
+async def test_add_match_rejects_cross_session_hypotheses(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "cross_session_match.sqlite") as store:
+        first_session = await store.create_session("first")
+        second_session = await store.create_session("second")
+        first = await store.add_hypothesis(
+            Hypothesis(session_id=first_session.id, content="A", summary="A")
+        )
+        second = await store.add_hypothesis(
+            Hypothesis(session_id=second_session.id, content="B", summary="B")
+        )
+        assert first.id is not None
+        assert second.id is not None
+
+        with pytest.raises(ValueError, match="match session"):
+            await store.add_match_and_update_elo(
+                Match(
+                    session_id=first_session.id,
+                    hypo_a_id=first.id,
+                    hypo_b_id=second.id,
+                    winner_id=first.id,
+                    transcript="Invalid cross-session match.",
+                )
+            )
+
+
+@pytest.mark.asyncio
+async def test_add_citations_batch_uses_single_batch_operation(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "citation_batch.sqlite") as store:
+        session = await store.create_session("citations")
+        inserted = await store.add_citations_batch(
+            [
+                Citation(source="pubmed", title="Paper A", pmid="1"),
+                Citation(source="arxiv", title="Paper B", arxiv_id="2401.00001"),
+            ],
+            session_id=session.id,
+        )
+
+        assert inserted == 2
+        async with store.db.execute(
+            "SELECT source, title FROM citations WHERE session_id = ? ORDER BY id",
+            (session.id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        assert [(row["source"], row["title"]) for row in rows] == [
+            ("pubmed", "Paper A"),
+            ("arxiv", "Paper B"),
+        ]
 
 
 def test_hypothesis_rejects_negative_elo() -> None:

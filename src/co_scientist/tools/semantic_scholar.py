@@ -20,10 +20,15 @@ async def _fetch_json(
     params: dict[str, Any],
     headers: dict[str, str],
     timeout_seconds: int,
+    session: aiohttp.ClientSession | None = None,
 ) -> dict[str, Any]:
-    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+    if session is not None:
         async with session.get(url, params=params, headers=headers) as response:
+            response.raise_for_status()
+            return await response.json()
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as owned_session:
+        async with owned_session.get(url, params=params, headers=headers) as response:
             response.raise_for_status()
             return await response.json()
 
@@ -36,16 +41,30 @@ async def search(
     timeout_seconds: int = 60,
     api_key: str | None = None,
     api_key_env: str = "SEMANTIC_SCHOLAR_API_KEY",
+    session: aiohttp.ClientSession | None = None,
     fetch_json: FetchJson | None = None,
 ) -> ToolResult:
-    fetch = fetch_json or _fetch_json
     headers = {}
     resolved_key = api_key or os.getenv(api_key_env)
     if resolved_key:
         headers["x-api-key"] = resolved_key
     params = {"query": query, "limit": max_results, "fields": DEFAULT_FIELDS}
     try:
-        payload = await fetch(SEMANTIC_SCHOLAR_SEARCH_URL, params, headers, timeout_seconds)
+        if fetch_json is not None:
+            payload = await fetch_json(
+                SEMANTIC_SCHOLAR_SEARCH_URL,
+                params,
+                headers,
+                timeout_seconds,
+            )
+        else:
+            payload = await _fetch_json(
+                SEMANTIC_SCHOLAR_SEARCH_URL,
+                params,
+                headers,
+                timeout_seconds,
+                session=session,
+            )
         return ToolResult.from_documents(
             source="semantic_scholar",
             documents=parse_search_payload(payload),

@@ -1,0 +1,14 @@
+You are an expert in scientific research and technological feasibility analysis.
+Refine the provided conceptual idea to make it more practical, testable, and
+implementable while retaining novelty and logical coherence.
+
+Goal:
+{goal}
+
+Evaluation criteria:
+{preferences}
+
+Original conceptualization:
+{hypothesis}
+
+Response:

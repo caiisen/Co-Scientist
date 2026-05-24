@@ -15,10 +15,19 @@ ATOM_NS = {"atom": "http://www.w3.org/2005/Atom"}
 FetchText = Callable[[str, dict[str, Any], int], Awaitable[str]]
 
 
-async def _fetch_text(url: str, params: dict[str, Any], timeout_seconds: int) -> str:
-    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
-    async with aiohttp.ClientSession(timeout=timeout) as session:
+async def _fetch_text(
+    url: str,
+    params: dict[str, Any],
+    timeout_seconds: int,
+    session: aiohttp.ClientSession | None = None,
+) -> str:
+    if session is not None:
         async with session.get(url, params=params) as response:
+            response.raise_for_status()
+            return await response.text()
+    timeout = aiohttp.ClientTimeout(total=timeout_seconds)
+    async with aiohttp.ClientSession(timeout=timeout) as owned_session:
+        async with owned_session.get(url, params=params) as response:
             response.raise_for_status()
             return await response.text()
 
@@ -29,9 +38,9 @@ async def search(
     *,
     max_results: int = 5,
     timeout_seconds: int = 60,
+    session: aiohttp.ClientSession | None = None,
     fetch_text: FetchText | None = None,
 ) -> ToolResult:
-    fetch = fetch_text or _fetch_text
     params = {
         "search_query": f"all:{query}",
         "start": 0,
@@ -40,7 +49,15 @@ async def search(
         "sortOrder": "descending",
     }
     try:
-        xml_text = await fetch(ARXIV_API_URL, params, timeout_seconds)
+        if fetch_text is not None:
+            xml_text = await fetch_text(ARXIV_API_URL, params, timeout_seconds)
+        else:
+            xml_text = await _fetch_text(
+                ARXIV_API_URL,
+                params,
+                timeout_seconds,
+                session=session,
+            )
         return ToolResult.from_documents(source="arxiv", documents=parse_arxiv_feed(xml_text))
     except (aiohttp.ClientError, TimeoutError, ET.ParseError) as exc:
         return ToolResult.from_documents(source="arxiv", documents=[], errors=[str(exc)])
