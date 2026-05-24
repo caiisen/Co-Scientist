@@ -1,0 +1,9 @@
+# Copy this file to config/local.yaml for machine-local overrides.
+# config/local.yaml is ignored by git.
+
+llm:
+  default_provider: openai
+  providers:
+    openai:
+      chat_model: gpt-4o-mini
+      temperature: 0.3

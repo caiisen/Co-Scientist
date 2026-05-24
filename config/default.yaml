@@ -1,0 +1,61 @@
+runtime:
+  max_ideas: 20
+  max_matches_per_idea: 5
+  worker_concurrency: 4
+  request_timeout_seconds: 60
+
+search:
+  tavily_enabled: true
+  pubmed_enabled: true
+  semantic_scholar_enabled: true
+  arxiv_enabled: true
+  max_results: 5
+
+llm:
+  default_provider: openai
+  providers:
+    openai:
+      api_key_env: OPENAI_API_KEY
+      base_url_env: OPENAI_BASE_URL
+      base_url: https://api.openai.com/v1
+      chat_model: gpt-4o-mini
+      embedding_model: text-embedding-3-small
+      temperature: 0.4
+      max_tokens: 4096
+    deepseek:
+      api_key_env: DEEPSEEK_API_KEY
+      base_url_env: DEEPSEEK_BASE_URL
+      base_url: https://api.deepseek.com
+      chat_model: deepseek-chat
+      embedding_model: text-embedding-3-small
+      temperature: 0.4
+      max_tokens: 4096
+    qwen:
+      api_key_env: QWEN_API_KEY
+      base_url_env: QWEN_BASE_URL
+      base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+      chat_model: qwen-plus
+      embedding_model: text-embedding-v3
+      temperature: 0.4
+      max_tokens: 4096
+    kimi:
+      api_key_env: KIMI_API_KEY
+      base_url_env: KIMI_BASE_URL
+      base_url: https://api.moonshot.cn/v1
+      chat_model: moonshot-v1-32k
+      embedding_model: text-embedding-3-small
+      temperature: 0.4
+      max_tokens: 4096
+  agents:
+    generation:
+      provider: openai
+    reflection:
+      provider: openai
+    ranking:
+      provider: openai
+    proximity:
+      provider: openai
+    evolution:
+      provider: openai
+    metareview:
+      provider: openai
