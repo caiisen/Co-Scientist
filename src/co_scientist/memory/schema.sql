@@ -84,3 +84,36 @@ CREATE TABLE IF NOT EXISTS overview (
   top_hypothesis_ids TEXT NOT NULL DEFAULT '[]',
   created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS citations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+  source TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT,
+  doi TEXT,
+  pmid TEXT,
+  arxiv_id TEXT,
+  semantic_scholar_id TEXT,
+  year INTEGER,
+  raw_json TEXT NOT NULL DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_citations_session_source
+  ON citations(session_id, source);
+
+CREATE TABLE IF NOT EXISTS tool_cache (
+  cache_key TEXT PRIMARY KEY,
+  source TEXT NOT NULL,
+  query TEXT NOT NULL,
+  max_results INTEGER NOT NULL,
+  options_hash TEXT NOT NULL,
+  status TEXT NOT NULL,
+  result_json TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_tool_cache_expires
+  ON tool_cache(expires_at);

@@ -26,6 +26,16 @@ class SearchConfig(BaseModel):
     semantic_scholar_enabled: bool = True
     arxiv_enabled: bool = True
     max_results: int = Field(default=5, gt=0)
+    cache_ttl_seconds: int = Field(default=604800, ge=0)
+    failed_cache_ttl_seconds: int = Field(default=300, ge=0)
+    tavily_api_key_env: str = "TAVILY_API_KEY"
+    ncbi_api_key_env: str = "NCBI_API_KEY"
+    ncbi_email_env: str = "NCBI_EMAIL"
+    semantic_scholar_api_key_env: str = "SEMANTIC_SCHOLAR_API_KEY"
+    tavily_max_results: int | None = Field(default=None, gt=0)
+    pubmed_max_results: int | None = Field(default=None, gt=0)
+    semantic_scholar_max_results: int | None = Field(default=None, gt=0)
+    arxiv_max_results: int | None = Field(default=None, gt=0)
 
 
 class ProviderConfig(BaseModel):

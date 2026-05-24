@@ -371,6 +371,113 @@ class SQLiteStore:
         await self.db.commit()
         return overview.model_copy(update={"id": cursor.lastrowid})
 
+    async def add_citation(
+        self,
+        *,
+        source: str,
+        title: str,
+        session_id: str | None = None,
+        url: str | None = None,
+        doi: str | None = None,
+        pmid: str | None = None,
+        arxiv_id: str | None = None,
+        semantic_scholar_id: str | None = None,
+        year: int | None = None,
+        raw_json: dict[str, Any] | None = None,
+    ) -> int:
+        cursor = await self.db.execute(
+            """
+            INSERT INTO citations (
+              session_id, source, title, url, doi, pmid, arxiv_id,
+              semantic_scholar_id, year, raw_json, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                session_id,
+                source,
+                title,
+                url,
+                doi,
+                pmid,
+                arxiv_id,
+                semantic_scholar_id,
+                year,
+                _json_dumps(raw_json or {}),
+                _dt_text(utc_now()),
+            ),
+        )
+        await self.db.commit()
+        return int(cursor.lastrowid)
+
+    async def set_tool_cache(
+        self,
+        *,
+        cache_key: str,
+        source: str,
+        query: str,
+        max_results: int,
+        options_hash: str,
+        status: str,
+        result_json: dict[str, Any],
+        expires_at: datetime,
+    ) -> None:
+        now = utc_now()
+        await self.db.execute(
+            """
+            INSERT INTO tool_cache (
+              cache_key, source, query, max_results, options_hash,
+              status, result_json, created_at, expires_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(cache_key) DO UPDATE SET
+              status = excluded.status,
+              result_json = excluded.result_json,
+              created_at = excluded.created_at,
+              expires_at = excluded.expires_at
+            """,
+            (
+                cache_key,
+                source,
+                query,
+                max_results,
+                options_hash,
+                status,
+                _json_dumps(result_json),
+                _dt_text(now),
+                _dt_text(expires_at),
+            ),
+        )
+        await self.db.commit()
+
+    async def get_tool_cache(
+        self,
+        cache_key: str,
+        *,
+        now: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        current = now or utc_now()
+        async with self.db.execute(
+            """
+            SELECT result_json FROM tool_cache
+            WHERE cache_key = ? AND expires_at > ?
+            """,
+            (cache_key, _dt_text(current)),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return _json_loads(row["result_json"], {})
+
+    async def purge_expired_tool_cache(self, *, now: datetime | None = None) -> int:
+        current = now or utc_now()
+        cursor = await self.db.execute(
+            "DELETE FROM tool_cache WHERE expires_at <= ?",
+            (_dt_text(current),),
+        )
+        await self.db.commit()
+        return cursor.rowcount
+
     async def count_hypotheses(self, session_id: str) -> int:
         return await self._count("hypotheses", session_id)
 
