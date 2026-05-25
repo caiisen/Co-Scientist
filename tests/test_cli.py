@@ -17,3 +17,15 @@ def test_config_show_cli_override() -> None:
 
     assert result.exit_code == 0
     assert "max_ideas: 9" in result.output
+
+
+def test_new_and_resume_expose_verbose_option() -> None:
+    runner = CliRunner()
+
+    new_help = runner.invoke(app, ["new", "--help"])
+    resume_help = runner.invoke(app, ["resume", "--help"])
+
+    assert new_help.exit_code == 0
+    assert resume_help.exit_code == 0
+    assert "--verbose" in new_help.output
+    assert "--verbose" in resume_help.output

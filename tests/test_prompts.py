@@ -42,7 +42,7 @@ def test_prompt_store_rejects_unknown_or_unsafe_template(tmp_path: Path) -> None
         store.load("../missing")
 
 
-def test_build_prompt_messages_injects_feedback_as_system_message() -> None:
+def test_build_prompt_messages_merges_feedback_into_system_message() -> None:
     messages = build_prompt_messages(
         system_prompt="agent instructions",
         user_prompt="do the task",
@@ -50,10 +50,12 @@ def test_build_prompt_messages_injects_feedback_as_system_message() -> None:
     )
 
     assert messages == [
-        {"role": "system", "content": "agent instructions"},
         {
             "role": "system",
-            "content": "Meta-review feedback for this run:\ncheck BBB permeability",
+            "content": (
+                "agent instructions\n\n"
+                "## Meta-review feedback for this run:\ncheck BBB permeability"
+            ),
         },
         {"role": "user", "content": "do the task"},
     ]

@@ -84,15 +84,21 @@ def new(
         Path,
         typer.Option("--db-path", help="SQLite database path."),
     ] = DEFAULT_DB_PATH,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Print detailed phase, task, input, and output logs."),
+    ] = False,
 ) -> None:
-    """Start a Phase 4 research session in the foreground."""
+    """Start a Phase 5 research session in the foreground."""
     config = _load_config_or_exit(session_config, None, None, None)
     goal = goal_file.read_text(encoding="utf-8").strip()
     if not goal:
         console.print("[red]Goal file is empty.[/red]")
         raise typer.Exit(code=2)
     try:
-        session_id = _run_async(run_new_session(db_path=db_path, config=config, goal=goal))
+        session_id = _run_async(
+            run_new_session(db_path=db_path, config=config, goal=goal, verbose=verbose)
+        )
     except Exception as exc:
         console.print(f"[red]Session failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -110,11 +116,22 @@ def resume(
         Path,
         typer.Option("--db-path", help="SQLite database path."),
     ] = DEFAULT_DB_PATH,
+    verbose: Annotated[
+        bool,
+        typer.Option("--verbose", "-v", help="Print detailed phase, task, input, and output logs."),
+    ] = False,
 ) -> None:
-    """Resume pending Phase 4 work for a research session."""
+    """Resume pending Phase 5 work for a research session."""
     config = _load_config_or_exit(session_config, None, None, None)
     try:
-        _run_async(run_resume_session(db_path=db_path, config=config, session_id=session_id))
+        _run_async(
+            run_resume_session(
+                db_path=db_path,
+                config=config,
+                session_id=session_id,
+                verbose=verbose,
+            )
+        )
     except Exception as exc:
         console.print(f"[red]Resume failed:[/red] {exc}")
         raise typer.Exit(code=1) from exc
@@ -129,7 +146,7 @@ def status(
         typer.Option("--db-path", help="SQLite database path."),
     ] = DEFAULT_DB_PATH,
 ) -> None:
-    """Show Phase 4 session status."""
+    """Show Phase 5 session status."""
     try:
         stats, review_count = _run_async(_load_status(db_path, session_id))
     except Exception as exc:
@@ -138,6 +155,12 @@ def status(
     console.print(f"Session: {session_id}")
     console.print(f"Hypotheses: {stats.hypothesis_count}")
     console.print(f"Reviews: {review_count}")
+    console.print(f"Matches: {stats.match_count}")
+    console.print(f"Matches per idea: {stats.matches_per_idea:.2f}")
+    if stats.top_hypotheses:
+        console.print("Top hypotheses:")
+        for hypothesis in stats.top_hypotheses:
+            console.print(f"  {hypothesis.elo}: {hypothesis.summary}")
     console.print("Tasks:")
     for task_status, count in sorted(stats.tasks_by_status.items(), key=lambda item: item[0].value):
         console.print(f"  {task_status.value}: {count}")

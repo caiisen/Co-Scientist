@@ -182,3 +182,30 @@ async def test_mark_terminal_state_before_dequeue_keeps_join_accounting(
         assert loaded_failed is not None
         assert loaded_done.status == TaskStatus.DONE
         assert loaded_failed.status == TaskStatus.FAILED
+
+
+@pytest.mark.asyncio
+async def test_enqueue_unique_action_dedupes_concurrent_calls(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "queue_unique.sqlite") as store:
+        session = await store.create_session("unique action")
+        queue = TaskQueue(store, session.id)
+
+        results = await asyncio.gather(
+            *(
+                queue.enqueue_unique_action(
+                    Task(
+                        session_id=session.id,
+                        agent="ranking",
+                        action="run_tournament_match",
+                        priority=int(TaskPriority.RANKING),
+                    )
+                )
+                for _ in range(5)
+            )
+        )
+        pending = await store.pending_tasks(session.id)
+
+        assert sum(result is not None for result in results) == 1
+        assert len(pending) == 1
+        assert pending[0].agent == "ranking"
+        assert pending[0].action == "run_tournament_match"

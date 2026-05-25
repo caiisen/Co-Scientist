@@ -43,6 +43,15 @@ def test_parse_hypothesis_block_uses_last_marker_and_strips_bold() -> None:
     assert result.value == "Final concise hypothesis."
 
 
+def test_parse_hypothesis_block_accepts_inline_final_marker() -> None:
+    result = parse_hypothesis_block(
+        "Reasoning first. Therefore my final HYPOTHESIS: Target NPC transport."
+    )
+
+    assert result.ok
+    assert result.value == "Target NPC transport."
+
+
 def test_parse_hypothesis_block_reports_failure() -> None:
     result = parse_hypothesis_block("No final block")
 

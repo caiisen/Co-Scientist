@@ -60,6 +60,32 @@ CREATE TABLE IF NOT EXISTS matches (
   created_at TEXT NOT NULL
 );
 
+CREATE INDEX IF NOT EXISTS idx_matches_session_pair
+  ON matches(session_id, hypo_a_id, hypo_b_id);
+
+CREATE TABLE IF NOT EXISTS hypothesis_embeddings (
+  hypothesis_id INTEGER PRIMARY KEY REFERENCES hypotheses(id) ON DELETE CASCADE,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  embedding_json TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_hypothesis_embeddings_session
+  ON hypothesis_embeddings(session_id);
+
+CREATE TABLE IF NOT EXISTS proximity_edges (
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  hypo_a_id INTEGER NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+  hypo_b_id INTEGER NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+  similarity REAL NOT NULL,
+  updated_at TEXT NOT NULL,
+  PRIMARY KEY(session_id, hypo_a_id, hypo_b_id),
+  CHECK(hypo_a_id < hypo_b_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_proximity_edges_session_similarity
+  ON proximity_edges(session_id, similarity DESC);
+
 CREATE TABLE IF NOT EXISTS tasks (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,

@@ -1,6 +1,8 @@
 """Specialized Co-Scientist agent foundations."""
 
 from co_scientist.agents.base import Agent, AgentContext
+from co_scientist.agents.proximity import ProximityAgent
+from co_scientist.agents.ranking import RankingAgent
 from co_scientist.agents.results import AgentResult, AgentResultKind
 
 __all__ = [
@@ -8,4 +10,6 @@ __all__ = [
     "AgentContext",
     "AgentResult",
     "AgentResultKind",
+    "ProximityAgent",
+    "RankingAgent",
 ]

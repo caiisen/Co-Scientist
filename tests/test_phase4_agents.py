@@ -111,12 +111,14 @@ async def test_generation_agent_creates_five_hypotheses(tmp_path: Path) -> None:
     assert result.kind == AgentResultKind.HYPOTHESIS_CREATED
     assert result.ok
     assert [item["source_strategy"] for item in result.payload["hypotheses"]] == [
-        "literature_review_summary_query",
+        "literature_review",
         "scientific_debate",
         "iterative_assumptions",
         "research_expansion",
-        "literature_review_goal_query",
+        "literature_review",
     ]
+    assert result.payload["hypotheses"][0]["query_variant"] == "summary"
+    assert result.payload["hypotheses"][4]["query_variant"] == "goal"
     assert all("citations" in item for item in result.payload["hypotheses"])
     assert len(result.citations) == 4
     assert len(client.messages) == 7
@@ -153,7 +155,8 @@ async def test_generation_agent_skips_single_parse_failure(tmp_path: Path) -> No
 
     assert result.ok
     assert len(result.payload["hypotheses"]) == 4
-    assert result.payload["errors"][0]["strategy"] == "literature_review_summary_query"
+    assert result.payload["errors"][0]["strategy"] == "literature_review"
+    assert result.payload["errors"][0]["query_variant"] == "summary"
 
 
 @pytest.mark.asyncio

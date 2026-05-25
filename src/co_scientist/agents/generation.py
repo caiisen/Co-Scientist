@@ -22,6 +22,7 @@ class GenerationSpec:
     strategy: str
     template_name: str
     query_variant: str = "summary"
+    source_strategy: str | None = None
     instructions: str | None = None
 
 
@@ -64,6 +65,7 @@ class GenerationAgent(Agent):
                 errors.append(
                     {
                         "strategy": spec.strategy,
+                        "query_variant": spec.query_variant,
                         "error": result.parse_error,
                         "raw_text": result.raw_text,
                     }
@@ -117,8 +119,9 @@ class GenerationAgent(Agent):
         text = await self.chat(ctx, self.build_messages(ctx, user_prompt=prompt))
         return _hypothesis_result(
             text,
-            strategy=spec.strategy,
+            strategy=spec.source_strategy or spec.strategy,
             citations=evidence.citations,
+            query_variant=spec.query_variant,
         )
 
     async def _scientific_debate(
@@ -169,9 +172,10 @@ class GenerationAgent(Agent):
 def _initial_specs() -> list[GenerationSpec]:
     return [
         GenerationSpec(
-            "literature_review_summary_query",
-            "generation_literature_review",
+            strategy="literature_review",
+            template_name="generation_literature_review",
             query_variant="summary",
+            source_strategy="literature_review",
             instructions=(
                 "Use the literature_review strategy with a compressed keyword search. "
                 "Prioritize direct evidence from the retrieved articles."
@@ -181,9 +185,10 @@ def _initial_specs() -> list[GenerationSpec]:
         GenerationSpec("iterative_assumptions", "generation_iterative_assumptions"),
         GenerationSpec("research_expansion", "generation_research_expansion"),
         GenerationSpec(
-            "literature_review_goal_query",
-            "generation_literature_review",
+            strategy="literature_review",
+            template_name="generation_literature_review",
             query_variant="goal",
+            source_strategy="literature_review",
             instructions=(
                 "Use the literature_review strategy with the full goal as the primary query. "
                 "Look for complementary evidence that may be missed by keyword compression."
@@ -231,6 +236,7 @@ def _hypothesis_result(
     *,
     strategy: str,
     citations: list[Any],
+    query_variant: str | None = None,
     raw_text: str | None = None,
 ) -> AgentResult:
     parsed = parse_hypothesis_block(text)
@@ -247,6 +253,7 @@ def _hypothesis_result(
             "content": content,
             "summary": summarize_hypothesis(content),
             "source_strategy": strategy,
+            "query_variant": query_variant,
             "citations": [citation.model_dump() for citation in citations],
         },
         citations=citations,

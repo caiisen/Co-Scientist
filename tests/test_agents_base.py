@@ -96,10 +96,12 @@ async def test_agent_build_messages_and_llm_routing(tmp_path: Path) -> None:
 
         assert ctx.llm_for("echo").provider.chat_model == "strong-chat"
         assert messages == [
-            {"role": "system", "content": agent.system_prompt},
             {
                 "role": "system",
-                "content": "Meta-review feedback for this run:\nreview novelty carefully",
+                "content": (
+                    agent.system_prompt
+                    + "\n\n## Meta-review feedback for this run:\nreview novelty carefully"
+                ),
             },
             {"role": "user", "content": "compare ideas"},
         ]

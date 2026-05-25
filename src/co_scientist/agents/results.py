@@ -11,6 +11,7 @@ from co_scientist.tools.models import Citation
 class AgentResultKind(StrEnum):
     HYPOTHESIS_CREATED = "hypothesis_created"
     REVIEW_COMPLETED = "review_completed"
+    PROXIMITY_UPDATED = "proximity_updated"
     RANKING_DECISION = "ranking_decision"
     FEEDBACK_GENERATED = "feedback_generated"
     OVERVIEW_GENERATED = "overview_generated"
@@ -27,4 +28,3 @@ class AgentResult(BaseModel):
     @property
     def ok(self) -> bool:
         return self.parse_error is None
-

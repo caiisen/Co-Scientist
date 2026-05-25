@@ -82,13 +82,14 @@ def build_prompt_messages(
     user_prompt: str,
     feedback: str | None = None,
 ) -> list[ChatMessage]:
-    messages: list[ChatMessage] = [{"role": "system", "content": system_prompt}]
+    system_content = system_prompt
     if feedback and feedback.strip():
-        messages.append(
-            {
-                "role": "system",
-                "content": "Meta-review feedback for this run:\n" + feedback.strip(),
-            }
+        system_content = (
+            system_prompt
+            + "\n\n## Meta-review feedback for this run:\n"
+            + feedback.strip()
         )
-    messages.append({"role": "user", "content": user_prompt})
-    return messages
+    return [
+        {"role": "system", "content": system_content},
+        {"role": "user", "content": user_prompt},
+    ]

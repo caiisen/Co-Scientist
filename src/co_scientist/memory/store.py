@@ -38,6 +38,12 @@ def _json_loads(value: str | None, default: Any) -> Any:
     return json.loads(value)
 
 
+def _task_json_loads(value: str | None, default: Any) -> Any:
+    if value is None or value == "" or value == "NULL":
+        return default
+    return _json_loads(value, default)
+
+
 def _dt(value: str) -> datetime:
     return datetime.fromisoformat(value)
 
@@ -88,6 +94,47 @@ class SQLiteStore:
 
     async def _migrate_schema(self) -> None:
         await self._ensure_column("citations", "dedupe_key", "TEXT")
+        await self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_matches_session_pair
+              ON matches(session_id, hypo_a_id, hypo_b_id)
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS hypothesis_embeddings (
+              hypothesis_id INTEGER PRIMARY KEY REFERENCES hypotheses(id) ON DELETE CASCADE,
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              embedding_json TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_hypothesis_embeddings_session
+              ON hypothesis_embeddings(session_id)
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS proximity_edges (
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              hypo_a_id INTEGER NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+              hypo_b_id INTEGER NOT NULL REFERENCES hypotheses(id) ON DELETE CASCADE,
+              similarity REAL NOT NULL,
+              updated_at TEXT NOT NULL,
+              PRIMARY KEY(session_id, hypo_a_id, hypo_b_id),
+              CHECK(hypo_a_id < hypo_b_id)
+            )
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_proximity_edges_session_similarity
+              ON proximity_edges(session_id, similarity DESC)
+            """
+        )
         await self.migrate_citation_dedupe_keys()
         session_ids = await self._session_ids_with_citations()
         for session_id in session_ids:
@@ -263,6 +310,20 @@ class SQLiteStore:
             rows = await cursor.fetchall()
         return [self._row_to_hypothesis(row) for row in rows]
 
+    async def list_reviewed_hypotheses(self, session_id: str) -> list[Hypothesis]:
+        async with self.db.execute(
+            """
+            SELECT DISTINCT hypotheses.*
+            FROM hypotheses
+            JOIN reviews ON reviews.hypothesis_id = hypotheses.id
+            WHERE hypotheses.session_id = ?
+            ORDER BY hypotheses.created_at ASC, hypotheses.id ASC
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._row_to_hypothesis(row) for row in rows]
+
     async def add_review(self, review: Review) -> Review:
         cursor = await self.db.execute(
             """
@@ -292,6 +353,19 @@ class SQLiteStore:
         ) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_review(row) for row in rows]
+
+    async def latest_review_for_hypothesis(self, hypothesis_id: int) -> Review | None:
+        async with self.db.execute(
+            """
+            SELECT * FROM reviews
+            WHERE hypothesis_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT 1
+            """,
+            (hypothesis_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return self._row_to_review(row) if row else None
 
     async def add_task(self, task: Task) -> Task:
         now = task.updated_at or utc_now()
@@ -340,6 +414,39 @@ class SQLiteStore:
         async with self.db.execute(sql, params) as cursor:
             rows = await cursor.fetchall()
         return [self._row_to_task(row) for row in rows]
+
+    async def has_active_task(
+        self,
+        session_id: str,
+        *,
+        agent: str,
+        action: str,
+        exclude_task_id: int | None = None,
+    ) -> bool:
+        id_filter = "" if exclude_task_id is None else "AND id != ?"
+        params: tuple[Any, ...] = (
+            session_id,
+            agent,
+            action,
+            TaskStatus.PENDING.value,
+            TaskStatus.RUNNING.value,
+        )
+        if exclude_task_id is not None:
+            params = params + (exclude_task_id,)
+        async with self.db.execute(
+            f"""
+            SELECT 1 FROM tasks
+            WHERE session_id = ?
+              AND agent = ?
+              AND action = ?
+              AND status IN (?, ?)
+              {id_filter}
+            LIMIT 1
+            """,
+            params,
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row is not None
 
     async def reset_running_tasks(self, session_id: str) -> int:
         now = utc_now()
@@ -450,6 +557,154 @@ class SQLiteStore:
             raise
         await self.db.commit()
         return match.model_copy(update={"id": cursor.lastrowid})
+
+    async def match_counts_by_hypothesis(self, session_id: str) -> dict[int, int]:
+        async with self.db.execute(
+            """
+            SELECT hypothesis_id, COUNT(*) AS count
+            FROM (
+              SELECT hypo_a_id AS hypothesis_id
+              FROM matches
+              WHERE session_id = ?
+              UNION ALL
+              SELECT hypo_b_id AS hypothesis_id
+              FROM matches
+              WHERE session_id = ?
+            )
+            GROUP BY hypothesis_id
+            """,
+            (session_id, session_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {int(row["hypothesis_id"]): int(row["count"]) for row in rows}
+
+    async def match_counts_by_pair(self, session_id: str) -> dict[tuple[int, int], int]:
+        async with self.db.execute(
+            """
+            SELECT
+              CASE WHEN hypo_a_id < hypo_b_id THEN hypo_a_id ELSE hypo_b_id END AS a_id,
+              CASE WHEN hypo_a_id < hypo_b_id THEN hypo_b_id ELSE hypo_a_id END AS b_id,
+              COUNT(*) AS count
+            FROM matches
+            WHERE session_id = ?
+            GROUP BY a_id, b_id
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {(int(row["a_id"]), int(row["b_id"])): int(row["count"]) for row in rows}
+
+    async def upsert_hypothesis_embedding(
+        self,
+        *,
+        session_id: str,
+        hypothesis_id: int,
+        embedding: list[float],
+    ) -> None:
+        await self.upsert_hypothesis_embeddings_batch(
+            session_id=session_id,
+            embeddings={hypothesis_id: embedding},
+        )
+
+    async def upsert_hypothesis_embeddings_batch(
+        self,
+        *,
+        session_id: str,
+        embeddings: dict[int, list[float]],
+    ) -> None:
+        if not embeddings:
+            return
+        now = _dt_text(utc_now())
+        await self.db.executemany(
+            """
+            INSERT INTO hypothesis_embeddings (
+              hypothesis_id, session_id, embedding_json, updated_at
+            )
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(hypothesis_id) DO UPDATE SET
+              embedding_json = excluded.embedding_json,
+              updated_at = excluded.updated_at
+            """,
+            [
+                (hypothesis_id, session_id, _json_dumps(embedding), now)
+                for hypothesis_id, embedding in embeddings.items()
+            ],
+        )
+        await self.db.commit()
+
+    async def embeddings_for_session(self, session_id: str) -> dict[int, list[float]]:
+        async with self.db.execute(
+            """
+            SELECT hypothesis_id, embedding_json
+            FROM hypothesis_embeddings
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            int(row["hypothesis_id"]): [
+                float(item) for item in _json_loads(row["embedding_json"], [])
+            ]
+            for row in rows
+        }
+
+    async def upsert_proximity_edge(
+        self,
+        *,
+        session_id: str,
+        hypo_a_id: int,
+        hypo_b_id: int,
+        similarity: float,
+    ) -> None:
+        await self.upsert_proximity_edges_batch(
+            session_id=session_id,
+            edges=[(hypo_a_id, hypo_b_id, similarity)],
+        )
+
+    async def upsert_proximity_edges_batch(
+        self,
+        *,
+        session_id: str,
+        edges: list[tuple[int, int, float]],
+    ) -> None:
+        if not edges:
+            return
+        now = _dt_text(utc_now())
+        rows = []
+        for hypo_a_id, hypo_b_id, similarity in edges:
+            a_id, b_id = sorted((hypo_a_id, hypo_b_id))
+            if a_id == b_id:
+                raise ValueError("proximity edge requires two distinct hypotheses")
+            rows.append((session_id, a_id, b_id, similarity, now))
+        await self.db.executemany(
+            """
+            INSERT INTO proximity_edges (
+              session_id, hypo_a_id, hypo_b_id, similarity, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(session_id, hypo_a_id, hypo_b_id) DO UPDATE SET
+              similarity = excluded.similarity,
+              updated_at = excluded.updated_at
+            """,
+            rows,
+        )
+        await self.db.commit()
+
+    async def proximity_edges_for_session(self, session_id: str) -> dict[tuple[int, int], float]:
+        async with self.db.execute(
+            """
+            SELECT hypo_a_id, hypo_b_id, similarity
+            FROM proximity_edges
+            WHERE session_id = ?
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return {
+            (int(row["hypo_a_id"]), int(row["hypo_b_id"])): float(row["similarity"])
+            for row in rows
+        }
 
     async def add_feedback(self, feedback: SystemFeedback) -> SystemFeedback:
         cursor = await self.db.execute(
@@ -847,8 +1102,8 @@ class SQLiteStore:
             target_id=row["target_id"],
             priority=row["priority"],
             status=TaskStatus(row["status"]),
-            payload_json=_json_loads(row["payload_json"], {}),
-            result_json=_json_loads(row["result_json"], None),
+            payload_json=_task_json_loads(row["payload_json"], {}),
+            result_json=_task_json_loads(row["result_json"], None),
             error=row["error"],
             created_at=_dt(row["created_at"]),
             updated_at=_dt(row["updated_at"]),

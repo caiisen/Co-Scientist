@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -15,6 +16,7 @@ from co_scientist.memory import (
     TaskPriority,
     TaskStatus,
 )
+from co_scientist.memory.store import _json_loads, _task_json_loads
 from co_scientist.tools.models import Citation
 
 
@@ -255,6 +257,52 @@ async def test_add_citations_batch_dedupes_and_links_artifacts(tmp_path: Path) -
             (2, "Paper B"),
         ]
 
+
+@pytest.mark.asyncio
+async def test_batch_upserts_embeddings_and_proximity_edges(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "proximity_batch.sqlite") as store:
+        session = await store.create_session("batch")
+        first = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="A", summary="A")
+        )
+        second = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="B", summary="B")
+        )
+        assert first.id is not None
+        assert second.id is not None
+
+        await store.upsert_hypothesis_embeddings_batch(
+            session_id=session.id,
+            embeddings={first.id: [1.0, 0.0], second.id: [0.5, 0.5]},
+        )
+        await store.upsert_proximity_edges_batch(
+            session_id=session.id,
+            edges=[(second.id, first.id, 0.75)],
+        )
+
+        assert await store.embeddings_for_session(session.id) == {
+            first.id: [1.0, 0.0],
+            second.id: [0.5, 0.5],
+        }
+        assert await store.proximity_edges_for_session(session.id) == {
+            (first.id, second.id): 0.75
+        }
+
+
 def test_hypothesis_rejects_negative_elo() -> None:
     with pytest.raises(ValidationError):
         Hypothesis(session_id="s", content="A", summary="A", elo=-1)
+
+
+def test_json_loads_is_strict_outside_task_legacy_fields() -> None:
+    assert _json_loads(None, {"fallback": True}) == {"fallback": True}
+    assert _json_loads("null", {"fallback": True}) is None
+    with pytest.raises(json.JSONDecodeError):
+        _json_loads("NULL", {"fallback": True})
+
+
+def test_task_json_loads_treats_legacy_null_strings_as_default() -> None:
+    assert _task_json_loads(None, {"fallback": True}) == {"fallback": True}
+    assert _task_json_loads("", {"fallback": True}) == {"fallback": True}
+    assert _task_json_loads("NULL", {"fallback": True}) == {"fallback": True}
+    assert _task_json_loads("null", {"fallback": True}) is None

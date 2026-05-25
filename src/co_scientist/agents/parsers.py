@@ -21,6 +21,10 @@ HYPOTHESIS_MARKER_RE = re.compile(
     r"^[ \t>#*-]*\*{0,2}HYPOTHESIS\*{0,2}\s*:?[ \t]*",
     re.IGNORECASE | re.MULTILINE,
 )
+INLINE_HYPOTHESIS_MARKER_RE = re.compile(
+    r"\b\*{0,2}HYPOTHESIS\*{0,2}\s*:\s*",
+    re.IGNORECASE,
+)
 SCORE_RE = re.compile(
     r"(?:overall\s+)?(?:score|rating|评分|总分|得分)\s*"
     r"(?:from\s*)?(?:0\s*(?:-|to|/)\s*10)?\s*[:：=]?\s*"
@@ -56,7 +60,9 @@ def parse_hypothesis_block(text: str) -> ParseResult:
     stripped = text.strip()
     matches = list(HYPOTHESIS_MARKER_RE.finditer(stripped))
     if not matches:
-        return ParseResult(None, "could not find final HYPOTHESIS block")
+        matches = list(INLINE_HYPOTHESIS_MARKER_RE.finditer(stripped))
+        if not matches:
+            return ParseResult(None, "could not find final HYPOTHESIS block")
     hypothesis = _strip_hypothesis_markers(stripped[matches[-1].end():])
     if not hypothesis:
         return ParseResult(None, "HYPOTHESIS block is empty")

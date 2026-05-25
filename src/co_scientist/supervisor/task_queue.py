@@ -32,6 +32,28 @@ class TaskQueue:
             self._put(stored)
         return stored
 
+    async def enqueue_unique_action(
+        self,
+        task: Task,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> Task | None:
+        if task.session_id != self.session_id:
+            raise ValueError("task session_id does not match queue session_id")
+        if task.status != TaskStatus.PENDING:
+            raise ValueError("only pending tasks can be enqueued")
+        async with self._lock:
+            if await self.store.has_active_task(
+                self.session_id,
+                agent=task.agent,
+                action=task.action,
+                exclude_task_id=exclude_task_id,
+            ):
+                return None
+            stored = await self.store.add_task(task)
+            self._put(stored)
+            return stored
+
     async def dequeue(self) -> Task:
         while True:
             _, _, task_id = await self._queue.get()
