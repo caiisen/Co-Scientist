@@ -78,6 +78,9 @@ class TaskQueue:
     def qsize(self) -> int:
         return self._queue.qsize()
 
+    async def join(self) -> None:
+        await self._queue.join()
+
     def _put(self, task: Task) -> None:
         if task.id is None or task.id in self._queued_ids:
             return

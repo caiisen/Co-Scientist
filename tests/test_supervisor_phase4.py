@@ -4,12 +4,15 @@ from pathlib import Path
 
 import pytest
 
+from co_scientist.agents.base import Agent
 from co_scientist.agents.generation import GenerationAgent
 from co_scientist.agents.reflection import ReflectionAgent
+from co_scientist.agents.results import AgentResult, AgentResultKind
 from co_scientist.config import AppConfig, LLMConfig, ProviderConfig, RuntimeConfig, SearchConfig
 from co_scientist.llm.client import LLMRouter
-from co_scientist.memory import SQLiteStore
+from co_scientist.memory import ResearchPlan, SQLiteStore, Task
 from co_scientist.supervisor import Supervisor
+from co_scientist.supervisor.task_queue import TaskQueue
 from co_scientist.tools.models import Citation, SearchDocument, ToolResult
 
 
@@ -29,6 +32,35 @@ class StaticRouter(LLMRouter):
 
     def client_for(self, agent=None):
         return self.client
+
+
+class BucketedGenerationAgent(Agent):
+    name = "generation"
+
+    async def execute(self, task: Task, ctx) -> AgentResult:
+        return AgentResult(
+            kind=AgentResultKind.HYPOTHESIS_CREATED,
+            payload={
+                "hypotheses": [
+                    {
+                        "content": "H1",
+                        "summary": "H1",
+                        "source_strategy": "test",
+                        "citations": [
+                            Citation(source="pubmed", title="Paper A", pmid="1").model_dump()
+                        ],
+                    },
+                    {
+                        "content": "H2",
+                        "summary": "H2",
+                        "source_strategy": "test",
+                        "citations": [
+                            Citation(source="pubmed", title="Paper B", pmid="2").model_dump()
+                        ],
+                    },
+                ]
+            },
+        )
 
 
 def make_config() -> AppConfig:
@@ -114,3 +146,40 @@ async def test_supervisor_runs_phase4_and_exports(tmp_path: Path) -> None:
         assert "Evidence references: [1] -> [R1]" in markdown
         assert "## References" in markdown
         assert "[R1] Paper. 2026. PMID: 1; https://pubmed.ncbi.nlm.nih.gov/1/." in markdown
+
+
+@pytest.mark.asyncio
+async def test_supervisor_links_hypothesis_citations_by_payload_bucket(tmp_path: Path) -> None:
+    config = make_config()
+    async with SQLiteStore(tmp_path / "supervisor_bucketed.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(ResearchPlan(session_id=session.id, goal=session.goal))
+        supervisor = Supervisor(
+            store=store,
+            config=config,
+            llm_router=StaticRouter(SequenceClient([])),
+            agents={"generation": BucketedGenerationAgent()},
+        )
+        queue = TaskQueue(store, session.id)
+        task = await queue.enqueue(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses")
+        )
+        ctx = supervisor._context(session.id, http_session=None)
+
+        result = await BucketedGenerationAgent().execute(task, ctx)
+        await supervisor._handle_result(queue, task, result)
+        hypotheses = await store.list_session_hypotheses(session.id)
+
+        first_links = await store.citation_links_for_artifact(
+            session_id=session.id,
+            artifact_type="hypothesis",
+            artifact_id=hypotheses[0].id or 0,
+        )
+        second_links = await store.citation_links_for_artifact(
+            session_id=session.id,
+            artifact_type="hypothesis",
+            artifact_id=hypotheses[1].id or 0,
+        )
+
+    assert [link["pmid"] for link in first_links] == ["1"]
+    assert [link["pmid"] for link in second_links] == ["2"]

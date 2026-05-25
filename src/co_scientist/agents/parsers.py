@@ -17,7 +17,10 @@ BETTER_IDEA_RE = re.compile(
     r"\bbetter\s+(?:idea|hypothesis)\s*:\s*([12])\b",
     re.IGNORECASE,
 )
-HYPOTHESIS_RE = re.compile(r"\bHYPOTHESIS\b\s*:?\s*(.+)\Z", re.IGNORECASE | re.DOTALL)
+HYPOTHESIS_MARKER_RE = re.compile(
+    r"^[ \t>#*-]*\*{0,2}HYPOTHESIS\*{0,2}\s*:?[ \t]*",
+    re.IGNORECASE | re.MULTILINE,
+)
 SCORE_RE = re.compile(
     r"(?:overall\s+)?(?:score|rating|评分|总分|得分)\s*"
     r"(?:from\s*)?(?:0\s*(?:-|to|/)\s*10)?\s*[:：=]?\s*"
@@ -50,10 +53,11 @@ def parse_better_idea(text: str) -> ParseResult:
 
 
 def parse_hypothesis_block(text: str) -> ParseResult:
-    match = HYPOTHESIS_RE.search(text.strip())
-    if match is None:
+    stripped = text.strip()
+    matches = list(HYPOTHESIS_MARKER_RE.finditer(stripped))
+    if not matches:
         return ParseResult(None, "could not find final HYPOTHESIS block")
-    hypothesis = match.group(1).strip()
+    hypothesis = _strip_hypothesis_markers(stripped[matches[-1].end():])
     if not hypothesis:
         return ParseResult(None, "HYPOTHESIS block is empty")
     return ParseResult(hypothesis)
@@ -125,12 +129,18 @@ def parse_observation_verdict(text: str) -> ParseResult:
 
 
 def _clean_summary_line(line: str) -> str:
-    cleaned = line.strip().lstrip("#*-0123456789. )\t").strip()
+    cleaned = line.strip()
+    cleaned = re.sub(r"\A(?:#{1,6}|[-*]|\d+[.)])\s+", "", cleaned).strip()
+    cleaned = re.sub(r"\A\*{1,2}HYPOTHESIS:?\*{1,2}\s*:?\s*", "", cleaned, flags=re.IGNORECASE)
     if not cleaned:
+        return ""
+    cleaned = _strip_wrapping_markdown(cleaned)
+    if cleaned.lower() == "hypothesis":
         return ""
     for prefix in ("summary:", "hypothesis:", "title:"):
         if cleaned.lower().startswith(prefix):
             cleaned = cleaned[len(prefix):].strip()
+            cleaned = _strip_wrapping_markdown(cleaned)
     return cleaned
 
 
@@ -139,3 +149,26 @@ def _truncate(text: str, max_chars: int) -> str:
     if len(normalized) <= max_chars:
         return normalized
     return normalized[: max_chars - 3].rstrip() + "..."
+
+
+def _strip_hypothesis_markers(text: str) -> str:
+    stripped = text.strip()
+    stripped = re.sub(r"\A\*+", "", stripped)
+    stripped = re.sub(r"\*+\Z", "", stripped)
+    return stripped.strip()
+
+
+def _strip_wrapping_markdown(text: str) -> str:
+    stripped = text.strip()
+    while len(stripped) >= 2 and (
+        (stripped.startswith("**") and stripped.endswith("**"))
+        or (stripped.startswith("__") and stripped.endswith("__"))
+    ):
+        stripped = stripped[2:-2].strip()
+    while len(stripped) >= 2 and (
+        (stripped.startswith("*") and stripped.endswith("*"))
+        or (stripped.startswith("_") and stripped.endswith("_"))
+        or (stripped.startswith("`") and stripped.endswith("`"))
+    ):
+        stripped = stripped[1:-1].strip()
+    return stripped

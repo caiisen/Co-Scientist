@@ -16,6 +16,7 @@ from co_scientist.memory.models import Task, TaskPriority
 from co_scientist.memory.store import SQLiteStore
 from co_scientist.supervisor.planner import create_research_plan
 from co_scientist.supervisor.task_queue import TaskQueue
+from co_scientist.tools.models import Citation
 
 
 class Supervisor:
@@ -168,13 +169,20 @@ class Supervisor:
         )
 
     async def _run_queue(self, queue: TaskQueue, ctx: AgentContext) -> None:
-        while queue.qsize() > 0:
-            tasks = [
-                asyncio.create_task(self._run_one(queue, ctx))
-                for _ in range(min(self.config.runtime.worker_concurrency, queue.qsize()))
-            ]
-            if tasks:
-                await asyncio.gather(*tasks)
+        workers = [
+            asyncio.create_task(self._run_worker(queue, ctx))
+            for _ in range(self.config.runtime.worker_concurrency)
+        ]
+        try:
+            await queue.join()
+        finally:
+            for worker in workers:
+                worker.cancel()
+            await asyncio.gather(*workers, return_exceptions=True)
+
+    async def _run_worker(self, queue: TaskQueue, ctx: AgentContext) -> None:
+        while True:
+            await self._run_one(queue, ctx)
 
     async def _run_one(self, queue: TaskQueue, ctx: AgentContext) -> None:
         task = await queue.dequeue()
@@ -237,11 +245,18 @@ class Supervisor:
             for payload in payloads
         ]
         stored_ids: list[int] = []
-        for candidate in hypotheses:
+        for candidate, payload in zip(hypotheses, payloads, strict=True):
             hypothesis = await self.store.add_hypothesis(candidate)
             if hypothesis.id is None:
                 continue
             stored_ids.append(hypothesis.id)
+            await self.store.add_citations_for_artifact(
+                _citations_from_payload(payload),
+                session_id=task.session_id,
+                artifact_type="hypothesis",
+                artifact_id=hypothesis.id,
+                source_task_id=task.id,
+            )
             await queue.enqueue(
                 Task(
                     session_id=task.session_id,
@@ -250,14 +265,6 @@ class Supervisor:
                     target_id=hypothesis.id,
                     priority=int(TaskPriority.REFLECTION),
                 )
-            )
-        for hypothesis_id in stored_ids:
-            await self.store.add_citations_for_artifact(
-                result.citations,
-                session_id=task.session_id,
-                artifact_type="hypothesis",
-                artifact_id=hypothesis_id,
-                source_task_id=task.id,
             )
         return stored_ids
 
@@ -275,6 +282,11 @@ def _result_debug_json(result: AgentResult) -> dict[str, Any]:
     if result.parse_error is not None:
         data["parse_error"] = result.parse_error
     return data
+
+
+def _citations_from_payload(payload: dict[str, Any]) -> list[Citation]:
+    citations = payload.get("citations") or []
+    return [Citation.model_validate(citation) for citation in citations]
 
 
 def _format_reference(index: int, citation: dict[str, Any]) -> str:

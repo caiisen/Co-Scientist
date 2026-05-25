@@ -31,6 +31,18 @@ def test_parse_hypothesis_block_extracts_final_text() -> None:
     assert result.value == "NPC phosphorylation disrupts transport."
 
 
+def test_parse_hypothesis_block_uses_last_marker_and_strips_bold() -> None:
+    result = parse_hypothesis_block(
+        "The instructions say **HYPOTHESIS** should appear later.\n"
+        "Intermediate text.\n"
+        "**HYPOTHESIS**\n\n"
+        "Final concise hypothesis."
+    )
+
+    assert result.ok
+    assert result.value == "Final concise hypothesis."
+
+
 def test_parse_hypothesis_block_reports_failure() -> None:
     result = parse_hypothesis_block("No final block")
 
@@ -59,6 +71,15 @@ def test_parse_review_score_accepts_fraction_and_chinese_labels() -> None:
 
 def test_summarize_hypothesis_uses_first_content_line() -> None:
     assert summarize_hypothesis("\n# Hypothesis: Target NPC transport\nMore detail") == (
+        "Target NPC transport"
+    )
+
+
+def test_summarize_hypothesis_strips_wrapping_markdown() -> None:
+    assert summarize_hypothesis("**Hypothesis:** **Target NPC transport**") == (
+        "Target NPC transport"
+    )
+    assert summarize_hypothesis("**HYPOTHESIS**\n\n**Target NPC transport**") == (
         "Target NPC transport"
     )
 

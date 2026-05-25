@@ -8,6 +8,7 @@ from co_scientist.tools.models import ToolResult
 from co_scientist.tools.query import build_literature_query
 
 from .base import Agent, AgentContext
+from .generation import infer_search_domain
 from .parsers import parse_review_score
 from .results import AgentResult, AgentResultKind
 
@@ -45,7 +46,7 @@ class ReflectionAgent(Agent):
                 build_literature_query(plan.goal),
                 plan.goal,
             ],
-            domain="biomed",
+            domain=infer_search_domain(plan),
             config=ctx.config.search,
             store=ctx.store,
             session_id=ctx.session_id,

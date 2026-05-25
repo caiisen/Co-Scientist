@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -110,14 +111,186 @@ async def test_generation_agent_creates_five_hypotheses(tmp_path: Path) -> None:
     assert result.kind == AgentResultKind.HYPOTHESIS_CREATED
     assert result.ok
     assert [item["source_strategy"] for item in result.payload["hypotheses"]] == [
-        "literature_review",
+        "literature_review_summary_query",
         "scientific_debate",
         "iterative_assumptions",
         "research_expansion",
-        "literature_review",
+        "literature_review_goal_query",
     ]
+    assert all("citations" in item for item in result.payload["hypotheses"])
     assert len(result.citations) == 4
     assert len(client.messages) == 7
+
+
+@pytest.mark.asyncio
+async def test_generation_agent_skips_single_parse_failure(tmp_path: Path) -> None:
+    client = SequenceClient(
+        [
+            "No final marker here.",
+            "Turn 1 discussion",
+            "Turn 2 discussion",
+            "Turn 3\nHYPOTHESIS\nDebate hypothesis",
+            "Assumptions\nHYPOTHESIS\nAssumption hypothesis",
+            "Expansion\nHYPOTHESIS\nExpansion hypothesis",
+            "Reasoning\nHYPOTHESIS\nLiterature hypothesis 2",
+        ]
+    )
+    config = make_config()
+    async with SQLiteStore(tmp_path / "generation_partial.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(ResearchPlan(session_id=session.id, goal=session.goal))
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(client),
+            config=config,
+            session_id=session.id,
+        )
+
+        result = await GenerationAgent(literature_search=fake_literature_search).execute(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses"),
+            ctx,
+        )
+
+    assert result.ok
+    assert len(result.payload["hypotheses"]) == 4
+    assert result.payload["errors"][0]["strategy"] == "literature_review_summary_query"
+
+
+@pytest.mark.asyncio
+async def test_generation_agent_runs_initial_strategies_concurrently(tmp_path: Path) -> None:
+    async def slow_literature_search(*args, **kwargs) -> ToolResult:
+        await asyncio.sleep(0.05)
+        return ToolResult(source="literature")
+
+    class EchoClient:
+        def __init__(self) -> None:
+            self.messages: list[list[dict[str, str]]] = []
+
+        async def chat(self, messages: list[dict[str, str]], **kwargs) -> str:
+            self.messages.append(messages)
+            await asyncio.sleep(0.05)
+            prompt = messages[-1]["content"]
+            if "You may now end with a final HYPOTHESIS." in prompt:
+                return "HYPOTHESIS\nDebate hypothesis"
+            if "Continue the discussion." in prompt:
+                return "Discussion"
+            return "HYPOTHESIS\nGenerated hypothesis"
+
+    config = make_config()
+    client = EchoClient()
+    started = asyncio.Event()
+    release = asyncio.Event()
+    active_searches = 0
+    max_active_searches = 0
+
+    async def gated_literature_search(*args, **kwargs) -> ToolResult:
+        nonlocal active_searches, max_active_searches
+        active_searches += 1
+        max_active_searches = max(max_active_searches, active_searches)
+        started.set()
+        await release.wait()
+        active_searches -= 1
+        return await slow_literature_search(*args, **kwargs)
+
+    async with SQLiteStore(tmp_path / "generation_concurrent.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(ResearchPlan(session_id=session.id, goal=session.goal))
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(client),
+            config=config,
+            session_id=session.id,
+        )
+
+        execution = asyncio.create_task(
+            GenerationAgent(literature_search=gated_literature_search).execute(
+                Task(
+                    session_id=session.id,
+                    agent="generation",
+                    action="create_initial_hypotheses",
+                ),
+                ctx,
+            )
+        )
+        await asyncio.wait_for(started.wait(), timeout=0.1)
+        await asyncio.sleep(0)
+        release.set()
+        result = await asyncio.wait_for(execution, timeout=1)
+
+    assert result.ok
+    assert len(result.payload["hypotheses"]) == 5
+    assert max_active_searches > 1
+
+
+@pytest.mark.asyncio
+async def test_agents_infer_non_biomed_search_domain(tmp_path: Path) -> None:
+    domains: list[str] = []
+
+    async def recording_literature_search(*args, **kwargs) -> ToolResult:
+        domains.append(kwargs["domain"])
+        return ToolResult.from_documents(
+            source="literature",
+            documents=[
+                SearchDocument(
+                    source="arxiv",
+                    title="Evidence paper",
+                    citation=Citation(
+                        source="arxiv",
+                        title="Evidence paper",
+                        arxiv_id="2601.00001",
+                    ),
+                )
+            ],
+        )
+
+    config = make_config()
+    client = SequenceClient(
+        [
+            "HYPOTHESIS\nGenerated",
+            "turn one",
+            "turn two",
+            "HYPOTHESIS\nDebate",
+            "HYPOTHESIS\nAssumption",
+            "HYPOTHESIS\nExpansion",
+            "HYPOTHESIS\nGenerated goal",
+            "Review\nOverall score: 7/10",
+        ]
+    )
+    async with SQLiteStore(tmp_path / "domain.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(
+            ResearchPlan(
+                session_id=session.id,
+                goal="Develop a computer science algorithm for theorem proving",
+                attributes=["computer science"],
+            )
+        )
+        hypothesis = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="Hypothesis body", summary="Hypothesis")
+        )
+        assert hypothesis.id is not None
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(client),
+            config=config,
+            session_id=session.id,
+        )
+
+        await GenerationAgent(literature_search=recording_literature_search).execute(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses"),
+            ctx,
+        )
+        await ReflectionAgent(literature_search=recording_literature_search).execute(
+            Task(
+                session_id=session.id,
+                agent="reflection",
+                action="full_review",
+                target_id=hypothesis.id,
+            ),
+            ctx,
+        )
+
+    assert set(domains) == {"cs"}
 
 
 @pytest.mark.asyncio

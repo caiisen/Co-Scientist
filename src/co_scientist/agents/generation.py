@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
@@ -20,6 +21,8 @@ LiteratureSearch = Callable[..., Awaitable[ToolResult]]
 class GenerationSpec:
     strategy: str
     template_name: str
+    query_variant: str = "summary"
+    instructions: str | None = None
 
 
 class GenerationAgent(Agent):
@@ -51,16 +54,35 @@ class GenerationAgent(Agent):
 
         results = []
         citations = []
-        for spec in _initial_specs():
-            result = await self._run_strategy(ctx, plan, spec)
+        errors = []
+        specs = _initial_specs()
+        strategy_results = await asyncio.gather(
+            *(self._run_strategy(ctx, plan, spec) for spec in specs)
+        )
+        for spec, result in zip(specs, strategy_results, strict=True):
             if result.parse_error:
-                return result
+                errors.append(
+                    {
+                        "strategy": spec.strategy,
+                        "error": result.parse_error,
+                        "raw_text": result.raw_text,
+                    }
+                )
+                continue
             results.append(result.payload)
             citations.extend(result.citations)
 
+        if not results:
+            return AgentResult(
+                kind=AgentResultKind.HYPOTHESIS_CREATED,
+                payload={"hypotheses": [], "errors": errors},
+                raw_text="All generation strategies failed to produce a hypothesis.",
+                parse_error="no hypotheses generated",
+            )
+
         return AgentResult(
             kind=AgentResultKind.HYPOTHESIS_CREATED,
-            payload={"hypotheses": results},
+            payload={"hypotheses": results, "errors": errors},
             citations=citations,
         )
 
@@ -75,8 +97,8 @@ class GenerationAgent(Agent):
 
         evidence = await _search_evidence(
             self.literature_search,
-            [build_literature_query(plan.goal), plan.goal],
-            domain="biomed",
+            _evidence_queries(plan, spec.query_variant),
+            domain=infer_search_domain(plan),
             config=ctx.config.search,
             store=ctx.store,
             session_id=ctx.session_id,
@@ -85,7 +107,7 @@ class GenerationAgent(Agent):
         )
         variables = _base_variables(plan) | {
             "source_hypothesis": "None",
-            "instructions": f"Use the {spec.strategy} strategy.",
+            "instructions": spec.instructions or f"Use the {spec.strategy} strategy.",
             "articles_with_reasoning": evidence.format_evidence_pack(
                 max_items=ctx.config.search.max_results,
             ),
@@ -146,11 +168,27 @@ class GenerationAgent(Agent):
 
 def _initial_specs() -> list[GenerationSpec]:
     return [
-        GenerationSpec("literature_review", "generation_literature_review"),
+        GenerationSpec(
+            "literature_review_summary_query",
+            "generation_literature_review",
+            query_variant="summary",
+            instructions=(
+                "Use the literature_review strategy with a compressed keyword search. "
+                "Prioritize direct evidence from the retrieved articles."
+            ),
+        ),
         GenerationSpec("scientific_debate", "generation_scientific_debate"),
         GenerationSpec("iterative_assumptions", "generation_iterative_assumptions"),
         GenerationSpec("research_expansion", "generation_research_expansion"),
-        GenerationSpec("literature_review", "generation_literature_review"),
+        GenerationSpec(
+            "literature_review_goal_query",
+            "generation_literature_review",
+            query_variant="goal",
+            instructions=(
+                "Use the literature_review strategy with the full goal as the primary query. "
+                "Look for complementary evidence that may be missed by keyword compression."
+            ),
+        ),
     ]
 
 
@@ -166,6 +204,26 @@ def _base_variables(plan: ResearchPlan) -> dict[str, str]:
 
 def _format_list(items: list[str]) -> str:
     return "\n".join(f"- {item}" for item in items) if items else "- Not specified"
+
+
+def _evidence_queries(plan: ResearchPlan, variant: str) -> list[str]:
+    summary_query = build_literature_query(plan.goal)
+    if variant == "goal":
+        return [plan.goal, summary_query]
+    return [summary_query, plan.goal]
+
+
+def infer_search_domain(plan: ResearchPlan) -> str:
+    text = " ".join(
+        [plan.goal, *plan.attributes, *plan.idea_attributes, *plan.preferences]
+    ).lower()
+    if any(term in text for term in ("arxiv", "computer science", "algorithm", "software")):
+        return "cs"
+    if any(term in text for term in ("physics", "quantum", "particle", "cosmology")):
+        return "physics"
+    if any(term in text for term in ("math", "mathematics", "theorem", "proof")):
+        return "math"
+    return "biomed"
 
 
 def _hypothesis_result(
@@ -189,6 +247,7 @@ def _hypothesis_result(
             "content": content,
             "summary": summarize_hypothesis(content),
             "source_strategy": strategy,
+            "citations": [citation.model_dump() for citation in citations],
         },
         citations=citations,
         raw_text=raw_text or text,
