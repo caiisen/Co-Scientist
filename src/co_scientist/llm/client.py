@@ -41,6 +41,14 @@ class LLMClient:
         async_client: AsyncOpenAI | None = None,
     ) -> None:
         self.provider = provider
+        _validate_ascii_secret(
+            provider.resolved_api_key,
+            provider.api_key_env or "provider.api_key",
+        )
+        _validate_ascii_secret(
+            provider.resolved_base_url,
+            provider.base_url_env or "provider.base_url",
+        )
         self._client = async_client or AsyncOpenAI(
             api_key=provider.resolved_api_key or "missing-api-key",
             base_url=provider.resolved_base_url,
@@ -132,3 +140,15 @@ class LLMRouter:
         if key not in self._clients:
             self._clients[key] = LLMClient(provider)
         return self._clients[key]
+
+
+def _validate_ascii_secret(value: str | None, name: str) -> None:
+    if value is None:
+        return
+    try:
+        value.encode("ascii")
+    except UnicodeEncodeError as exc:
+        raise ValueError(
+            f"{name} contains non-ASCII characters. Re-enter it with plain ASCII quotes; "
+            "smart quotes such as “...” are not valid in API keys or base URLs."
+        ) from exc

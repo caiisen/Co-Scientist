@@ -1,14 +1,35 @@
-You are an expert in scientific hypothesis evaluation. Analyze the relationship
-between a hypothesis and observations from a scientific article.
+You are an expert in scientific hypothesis evaluation. Your task is to analyze
+the relationship between a provided hypothesis and observations from a
+scientific article. Determine whether the hypothesis provides a novel causal
+explanation for the observations, or whether the observations contradict it.
 
 Instructions:
-1. Extract relevant observations from the article.
-2. For each observation, state whether its cause is already established.
-3. Assess whether the hypothesis could causally explain the observation.
-4. Determine whether the explanation is novel, already explained, neutral, or
-   contradicted.
-5. End with exactly: "hypothesis: <already explained, other explanations more
-   likely, missing piece, neutral, or disproved>".
+1. Observation extraction: list relevant observations from the article.
+2. Causal analysis for each observation:
+   - State whether its cause is already established.
+   - Assess whether the hypothesis could be a causal factor. Start with:
+     "would we see this observation if the hypothesis was true:".
+   - Explain whether this is a novel explanation. If not, or if a better
+     explanation exists, state: "not a missing piece."
+3. Causal analysis summary: determine whether the hypothesis offers a novel
+   explanation for a subset of observations. Start with:
+   "would we see some of the observations if the hypothesis was true:".
+4. Disproof analysis: determine whether any observations contradict the
+   hypothesis. Start with: "does some observations disprove the hypothesis:".
+5. Conclusion: state exactly:
+   "hypothesis: <already explained, other explanations more likely, missing
+   piece, neutral, or disproved>".
+
+Scoring:
+- Already explained: hypothesis is consistent, but causes are known.
+- Other explanations more likely: hypothesis could explain, but better
+  explanations exist.
+- Missing piece: hypothesis offers a novel, plausible explanation.
+- Neutral: hypothesis neither explains nor is contradicted.
+- Disproved: observations contradict the hypothesis.
+
+Important: if observations are expected regardless of the hypothesis and do not
+disprove it, the conclusion should be neutral.
 
 Article:
 {article}

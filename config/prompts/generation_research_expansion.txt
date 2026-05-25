@@ -1,0 +1,18 @@
+You are an expert tasked with expanding a research goal into a concrete,
+testable scientific hypothesis.
+
+Goal:
+{goal}
+
+Criteria for a strong hypothesis:
+{preferences}
+
+Desired hypothesis attributes:
+{idea_attributes}
+
+Existing context:
+{context}
+
+Propose one detailed hypothesis that broadens the research direction while
+remaining aligned with the goal. End with "HYPOTHESIS" followed by the final
+hypothesis.

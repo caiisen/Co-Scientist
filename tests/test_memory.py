@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from co_scientist.memory import (
     Hypothesis,
     Match,
+    ResearchPlan,
     Review,
     SQLiteStore,
     Task,
@@ -61,6 +62,8 @@ async def test_memory_crud_elo_transaction_and_reopen(tmp_path: Path) -> None:
             )
         )
         assert review.id is not None
+        reviews = await store.reviews_for_hypothesis(first.id)
+        assert [item.id for item in reviews] == [review.id]
 
         match = await store.add_match_and_update_elo(
             Match(
@@ -83,6 +86,31 @@ async def test_memory_crud_elo_transaction_and_reopen(tmp_path: Path) -> None:
         assert restored.goal == "discover a better assay"
         assert await reopened.count_hypotheses(session.id) == 2
         assert await reopened.count_matches(session.id) == 1
+        assert await reopened.count_reviews(session.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_research_plan_and_list_session_hypotheses(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "plan.sqlite") as store:
+        session = await store.create_session("goal")
+        plan = await store.save_research_plan(
+            ResearchPlan(
+                session_id=session.id,
+                goal=session.goal,
+                preferences=["novel"],
+                attributes=["mechanistic"],
+                constraints=["safe"],
+                idea_attributes=["testable"],
+            )
+        )
+        await store.add_hypothesis(Hypothesis(session_id=session.id, content="A", summary="A"))
+        await store.add_hypothesis(Hypothesis(session_id=session.id, content="B", summary="B"))
+
+        loaded = await store.get_research_plan(session.id)
+        hypotheses = await store.list_session_hypotheses(session.id)
+
+    assert loaded == plan
+    assert [hypothesis.summary for hypothesis in hypotheses] == ["A", "B"]
 
 
 @pytest.mark.asyncio
@@ -189,28 +217,43 @@ async def test_add_match_rejects_cross_session_hypotheses(tmp_path: Path) -> Non
 
 
 @pytest.mark.asyncio
-async def test_add_citations_batch_uses_single_batch_operation(tmp_path: Path) -> None:
+async def test_add_citations_batch_dedupes_and_links_artifacts(tmp_path: Path) -> None:
     async with SQLiteStore(tmp_path / "citation_batch.sqlite") as store:
         session = await store.create_session("citations")
-        inserted = await store.add_citations_batch(
+        citation_ids = await store.add_citations_batch(
             [
                 Citation(source="pubmed", title="Paper A", pmid="1"),
+                Citation(source="semantic_scholar", title="Paper A duplicate", pmid="1"),
                 Citation(source="arxiv", title="Paper B", arxiv_id="2401.00001"),
             ],
             session_id=session.id,
         )
+        await store.add_citation_links(
+            citation_ids,
+            session_id=session.id,
+            artifact_type="review",
+            artifact_id=7,
+        )
 
-        assert inserted == 2
+        assert len(citation_ids) == 2
         async with store.db.execute(
-            "SELECT source, title FROM citations WHERE session_id = ? ORDER BY id",
+            "SELECT source, title, dedupe_key FROM citations WHERE session_id = ? ORDER BY id",
             (session.id,),
         ) as cursor:
             rows = await cursor.fetchall()
-        assert [(row["source"], row["title"]) for row in rows] == [
-            ("pubmed", "Paper A"),
-            ("arxiv", "Paper B"),
+        assert [(row["source"], row["dedupe_key"]) for row in rows] == [
+            ("pubmed", "pmid:1"),
+            ("arxiv", "arxiv:2401.00001"),
         ]
-
+        links = await store.citation_links_for_artifact(
+            session_id=session.id,
+            artifact_type="review",
+            artifact_id=7,
+        )
+        assert [(link["evidence_index"], link["title"]) for link in links] == [
+            (1, "Paper A"),
+            (2, "Paper B"),
+        ]
 
 def test_hypothesis_rejects_negative_elo() -> None:
     with pytest.raises(ValidationError):

@@ -95,6 +95,7 @@ class ResearchPlan(BaseModel):
     attributes: list[str] = Field(default_factory=list)
     constraints: list[str] = Field(default_factory=list)
     idea_attributes: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=utc_now)
 
 
 class SystemFeedback(BaseModel):

@@ -87,11 +87,12 @@ async def test_task_queue_restores_pending_and_marks_terminal_states(tmp_path: P
             )
         )
         assert failed.id is not None
-        await queue.mark_failed(failed.id, "model timeout")
+        await queue.mark_failed(failed.id, "model timeout", result_json={"raw_text": "timeout"})
         loaded_failed = await reopened.get_task(failed.id)
         assert loaded_failed is not None
         assert loaded_failed.status == TaskStatus.FAILED
         assert loaded_failed.error == "model timeout"
+        assert loaded_failed.result_json == {"raw_text": "timeout"}
 
 
 @pytest.mark.asyncio

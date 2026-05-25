@@ -140,3 +140,15 @@ def test_router_applies_agent_override() -> None:
     assert router.client_for("ranking").provider.temperature == 0.1
     assert router.client_for("generation").provider.chat_model == "creative-chat"
     assert router.client_for("reflection").provider.chat_model == "cheap-chat"
+
+
+def test_client_rejects_non_ascii_api_key() -> None:
+    with pytest.raises(ValueError, match="non-ASCII"):
+        LLMClient(
+            ProviderConfig(
+                api_key="“bad-key”",
+                api_key_env="OPENAI_API_KEY",
+                chat_model="test-chat",
+            ),
+            async_client=FakeAsyncOpenAI(),
+        )

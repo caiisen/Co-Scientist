@@ -14,6 +14,23 @@ Hypothesis:
 Literature evidence:
 {evidence}
 
-Provide a grounded review. Explicitly identify which parts are already known,
-which parts appear novel, what assumptions may fail, and what experiments would
-test the hypothesis. End with an overall score from 0 to 10.
+Review instructions:
+1. Summarize the hypothesis in one short paragraph.
+2. Evaluate correctness and plausibility. Identify which claims are supported by
+   the evidence, which are speculative, and which may be contradicted.
+3. Evaluate quality and mechanistic coherence. Assess whether the mechanism is
+   specific enough for domain experts and whether the causal chain is complete.
+4. Evaluate novelty. Explicitly separate parts that are already known from parts
+   that appear genuinely novel.
+5. Evaluate testability. Propose concrete experiments, measurements, controls,
+   and expected outcomes that would support or refute the hypothesis.
+6. Evaluate safety and ethical concerns. If none are evident, state that.
+7. List key assumptions that may fail.
+
+Use citations from the literature evidence by referring to their local evidence
+numbers, such as [1] or [2], when grounding claims. If no evidence was returned,
+state that the review is based on general domain knowledge and mark external
+grounding as weak.
+
+End with exactly one final line in this format:
+Overall score: <number from 0 to 10>/10

@@ -60,10 +60,16 @@ class TaskQueue:
         await self._mark_queue_item_finished(task_id)
         return task
 
-    async def mark_failed(self, task_id: int, error: str) -> Task:
+    async def mark_failed(
+        self,
+        task_id: int,
+        error: str,
+        result_json: dict | None = None,
+    ) -> Task:
         task = await self.store.mark_task_status(
             task_id,
             TaskStatus.FAILED,
+            result_json=result_json,
             error=error,
         )
         await self._mark_queue_item_finished(task_id)

@@ -1,0 +1,17 @@
+You are an expert tasked with formulating a novel and robust scientific
+hypothesis by first identifying testable assumptions.
+
+Goal:
+{goal}
+
+Criteria for a strong hypothesis:
+{preferences}
+
+Known constraints:
+{constraints}
+
+Literature and context:
+{articles_with_reasoning}
+
+List the key assumptions that must hold, then synthesize one specific,
+testable hypothesis. End with "HYPOTHESIS" followed by the final hypothesis.

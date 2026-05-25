@@ -14,3 +14,4 @@ runs/
 *.sqlite
 *.sqlite3
 doc
+temp/

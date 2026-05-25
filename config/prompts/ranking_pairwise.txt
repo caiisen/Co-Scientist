@@ -1,5 +1,6 @@
-You are an expert evaluator comparing two hypotheses. Determine which hypothesis
-is superior for the specified research goal and criteria.
+You are an expert evaluator tasked with comparing two hypotheses. Evaluate
+hypothesis 1 and hypothesis 2, then determine which one is superior based on the
+specified idea attributes and criteria.
 
 Goal:
 {goal}
@@ -10,7 +11,9 @@ Evaluation criteria:
 Additional notes:
 {notes}
 
-Ignore numerical review scores; they may not be comparable across reviews.
+Each hypothesis includes an independent review. These reviews may contain
+numerical scores. Disregard these scores in your comparative analysis, as they
+may not be directly comparable across reviews.
 
 Hypothesis 1:
 {hypothesis_1}
@@ -24,4 +27,6 @@ Review of hypothesis 1:
 Review of hypothesis 2:
 {review_2}
 
-Provide a concise rationale and conclude with "better idea: <1 or 2>".
+Reasoning and conclusion:
+Provide a concise rationale for your selection, concluding with the phrase
+"better idea: <1 or 2>".

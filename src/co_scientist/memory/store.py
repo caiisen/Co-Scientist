@@ -13,6 +13,7 @@ from co_scientist.memory.models import (
     Hypothesis,
     Match,
     ResearchOverview,
+    ResearchPlan,
     Review,
     Session,
     SystemFeedback,
@@ -82,7 +83,38 @@ class SQLiteStore:
     async def init_schema(self) -> None:
         schema = SCHEMA_PATH.read_text(encoding="utf-8")
         await self.db.executescript(schema)
+        await self._migrate_schema()
         await self.db.commit()
+
+    async def _migrate_schema(self) -> None:
+        await self._ensure_column("citations", "dedupe_key", "TEXT")
+        await self.migrate_citation_dedupe_keys()
+        session_ids = await self._session_ids_with_citations()
+        for session_id in session_ids:
+            await self.deduplicate_existing_citations(session_id)
+        await self.db.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_citations_session_dedupe
+              ON citations(session_id, dedupe_key)
+            """
+        )
+
+    async def _ensure_column(self, table: str, column: str, definition: str) -> None:
+        async with self.db.execute(f"PRAGMA table_info({table})") as cursor:
+            rows = await cursor.fetchall()
+        if any(row["name"] == column for row in rows):
+            return
+        await self.db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+    async def _session_ids_with_citations(self) -> list[str]:
+        async with self.db.execute(
+            """
+            SELECT DISTINCT session_id FROM citations
+            WHERE session_id IS NOT NULL
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [str(row["session_id"]) for row in rows]
 
     async def create_session(
         self,
@@ -120,6 +152,52 @@ class SQLiteStore:
             id=row["id"],
             goal=row["goal"],
             config_json=_json_loads(row["config_json"], {}),
+            created_at=_dt(row["created_at"]),
+        )
+
+    async def save_research_plan(self, plan: ResearchPlan) -> ResearchPlan:
+        await self.db.execute(
+            """
+            INSERT INTO research_plans (
+              session_id, goal, preferences, attributes, constraints, idea_attributes, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(session_id) DO UPDATE SET
+              goal = excluded.goal,
+              preferences = excluded.preferences,
+              attributes = excluded.attributes,
+              constraints = excluded.constraints,
+              idea_attributes = excluded.idea_attributes,
+              created_at = excluded.created_at
+            """,
+            (
+                plan.session_id,
+                plan.goal,
+                _json_dumps(plan.preferences),
+                _json_dumps(plan.attributes),
+                _json_dumps(plan.constraints),
+                _json_dumps(plan.idea_attributes),
+                _dt_text(plan.created_at),
+            ),
+        )
+        await self.db.commit()
+        return plan
+
+    async def get_research_plan(self, session_id: str) -> ResearchPlan | None:
+        async with self.db.execute(
+            "SELECT * FROM research_plans WHERE session_id = ?",
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        if row is None:
+            return None
+        return ResearchPlan(
+            session_id=row["session_id"],
+            goal=row["goal"],
+            preferences=_json_loads(row["preferences"], []),
+            attributes=_json_loads(row["attributes"], []),
+            constraints=_json_loads(row["constraints"], []),
+            idea_attributes=_json_loads(row["idea_attributes"], []),
             created_at=_dt(row["created_at"]),
         )
 
@@ -173,6 +251,18 @@ class SQLiteStore:
             rows = await cursor.fetchall()
         return [self._row_to_hypothesis(row) for row in rows]
 
+    async def list_session_hypotheses(self, session_id: str) -> list[Hypothesis]:
+        async with self.db.execute(
+            """
+            SELECT * FROM hypotheses
+            WHERE session_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._row_to_hypothesis(row) for row in rows]
+
     async def add_review(self, review: Review) -> Review:
         cursor = await self.db.execute(
             """
@@ -190,6 +280,18 @@ class SQLiteStore:
         )
         await self.db.commit()
         return review.model_copy(update={"id": cursor.lastrowid})
+
+    async def reviews_for_hypothesis(self, hypothesis_id: int) -> list[Review]:
+        async with self.db.execute(
+            """
+            SELECT * FROM reviews
+            WHERE hypothesis_id = ?
+            ORDER BY created_at ASC, id ASC
+            """,
+            (hypothesis_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._row_to_review(row) for row in rows]
 
     async def add_task(self, task: Task) -> Task:
         now = task.updated_at or utc_now()
@@ -391,51 +493,61 @@ class SQLiteStore:
         year: int | None = None,
         raw_json: dict[str, Any] | None = None,
     ) -> int:
-        cursor = await self.db.execute(
-            """
-            INSERT INTO citations (
-              session_id, source, title, url, doi, pmid, arxiv_id,
-              semantic_scholar_id, year, raw_json, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                session_id,
-                source,
-                title,
-                url,
-                doi,
-                pmid,
-                arxiv_id,
-                semantic_scholar_id,
-                year,
-                _json_dumps(raw_json or {}),
-                _dt_text(utc_now()),
-            ),
+        from co_scientist.tools.models import Citation
+
+        citation = Citation(
+            source=source,
+            title=title,
+            url=url,
+            doi=doi,
+            pmid=pmid,
+            arxiv_id=arxiv_id,
+            semantic_scholar_id=semantic_scholar_id,
+            year=year,
+            raw_json=raw_json or {},
         )
-        await self.db.commit()
-        return int(cursor.lastrowid)
+        ids = await self.add_citations_batch([citation], session_id=session_id)
+        return ids[0]
 
     async def add_citations_batch(
         self,
         citations: list[Citation],
         *,
         session_id: str | None = None,
-    ) -> int:
+    ) -> list[int]:
         if not citations:
-            return 0
+            return []
         now = _dt_text(utc_now())
-        await self.db.executemany(
-            """
-            INSERT INTO citations (
-              session_id, source, title, url, doi, pmid, arxiv_id,
-              semantic_scholar_id, year, raw_json, created_at
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            [
+        ids: list[int] = []
+        seen: set[str] = set()
+        for citation in citations:
+            dedupe_key = citation.dedupe_key()
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+            await self.db.execute(
+                """
+                INSERT INTO citations (
+                  session_id, dedupe_key, source, title, url, doi, pmid, arxiv_id,
+                  semantic_scholar_id, year, raw_json, created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(session_id, dedupe_key) DO UPDATE SET
+                  title = COALESCE(NULLIF(excluded.title, ''), citations.title),
+                  url = COALESCE(excluded.url, citations.url),
+                  doi = COALESCE(excluded.doi, citations.doi),
+                  pmid = COALESCE(excluded.pmid, citations.pmid),
+                  arxiv_id = COALESCE(excluded.arxiv_id, citations.arxiv_id),
+                  semantic_scholar_id = COALESCE(
+                    excluded.semantic_scholar_id,
+                    citations.semantic_scholar_id
+                  ),
+                  year = COALESCE(excluded.year, citations.year),
+                  raw_json = excluded.raw_json
+                """,
                 (
                     session_id,
+                    dedupe_key,
                     citation.source,
                     citation.title,
                     citation.url,
@@ -446,12 +558,182 @@ class SQLiteStore:
                     citation.year,
                     _json_dumps(citation.raw_json),
                     now,
+                ),
+            )
+            async with self.db.execute(
+                """
+                SELECT id FROM citations
+                WHERE session_id IS ? AND dedupe_key = ?
+                """,
+                (session_id, dedupe_key),
+            ) as select_cursor:
+                row = await select_cursor.fetchone()
+            if row is None:
+                raise RuntimeError("failed to resolve citation id after upsert")
+            ids.append(int(row["id"]))
+        await self.db.commit()
+        return ids
+
+    async def add_citation_links(
+        self,
+        citation_ids: list[int],
+        *,
+        session_id: str,
+        artifact_type: str,
+        artifact_id: int,
+        source_task_id: int | None = None,
+    ) -> int:
+        if not citation_ids:
+            return 0
+        now = _dt_text(utc_now())
+        await self.db.executemany(
+            """
+            INSERT OR IGNORE INTO citation_links (
+              session_id, citation_id, artifact_type, artifact_id,
+              source_task_id, evidence_index, created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    session_id,
+                    citation_id,
+                    artifact_type,
+                    artifact_id,
+                    source_task_id,
+                    index,
+                    now,
                 )
-                for citation in citations
+                for index, citation_id in enumerate(citation_ids, start=1)
             ],
         )
         await self.db.commit()
-        return len(citations)
+        return len(citation_ids)
+
+    async def add_citations_for_artifact(
+        self,
+        citations: list[Citation],
+        *,
+        session_id: str,
+        artifact_type: str,
+        artifact_id: int,
+        source_task_id: int | None = None,
+    ) -> list[int]:
+        citation_ids = await self.add_citations_batch(citations, session_id=session_id)
+        await self.add_citation_links(
+            citation_ids,
+            session_id=session_id,
+            artifact_type=artifact_type,
+            artifact_id=artifact_id,
+            source_task_id=source_task_id,
+        )
+        return citation_ids
+
+    async def list_citations(self, session_id: str) -> list[dict[str, Any]]:
+        async with self.db.execute(
+            """
+            SELECT * FROM citations
+            WHERE session_id = ?
+            ORDER BY id ASC
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def citation_links_for_artifact(
+        self,
+        *,
+        session_id: str,
+        artifact_type: str,
+        artifact_id: int,
+    ) -> list[dict[str, Any]]:
+        async with self.db.execute(
+            """
+            SELECT citation_links.evidence_index, citations.*
+            FROM citation_links
+            JOIN citations ON citations.id = citation_links.citation_id
+            WHERE citation_links.session_id = ?
+              AND citation_links.artifact_type = ?
+              AND citation_links.artifact_id = ?
+            ORDER BY citation_links.evidence_index ASC
+            """,
+            (session_id, artifact_type, artifact_id),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
+
+    async def migrate_citation_dedupe_keys(self) -> None:
+        async with self.db.execute(
+            """
+            SELECT id, source, title, url, doi, pmid, arxiv_id,
+                   semantic_scholar_id, year, raw_json
+            FROM citations
+            WHERE dedupe_key IS NULL OR dedupe_key = ''
+            """
+        ) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            return
+        from co_scientist.tools.models import Citation
+
+        for row in rows:
+            citation = Citation(
+                source=row["source"],
+                title=row["title"],
+                url=row["url"],
+                doi=row["doi"],
+                pmid=row["pmid"],
+                arxiv_id=row["arxiv_id"],
+                semantic_scholar_id=row["semantic_scholar_id"],
+                year=row["year"],
+                raw_json=_json_loads(row["raw_json"], {}),
+            )
+            await self.db.execute(
+                "UPDATE citations SET dedupe_key = ? WHERE id = ?",
+                (citation.dedupe_key(), row["id"]),
+            )
+        await self.db.commit()
+
+    async def deduplicate_existing_citations(self, session_id: str) -> int:
+        await self.migrate_citation_dedupe_keys()
+        async with self.db.execute(
+            """
+            SELECT dedupe_key, MIN(id) AS keep_id, COUNT(*) AS count
+            FROM citations
+            WHERE session_id = ?
+            GROUP BY dedupe_key
+            HAVING count > 1
+            """,
+            (session_id,),
+        ) as cursor:
+            duplicate_groups = await cursor.fetchall()
+        removed = 0
+        for group in duplicate_groups:
+            keep_id = int(group["keep_id"])
+            async with self.db.execute(
+                """
+                SELECT id FROM citations
+                WHERE session_id = ? AND dedupe_key = ? AND id != ?
+                """,
+                (session_id, group["dedupe_key"], keep_id),
+            ) as cursor:
+                duplicate_rows = await cursor.fetchall()
+            duplicate_ids = [int(row["id"]) for row in duplicate_rows]
+            for duplicate_id in duplicate_ids:
+                await self.db.execute(
+                    "UPDATE citation_links SET citation_id = ? WHERE citation_id = ?",
+                    (keep_id, duplicate_id),
+                )
+            if duplicate_ids:
+                placeholders = ",".join("?" for _ in duplicate_ids)
+                await self.db.execute(
+                    f"DELETE FROM citations WHERE id IN ({placeholders})",
+                    duplicate_ids,
+                )
+                removed += len(duplicate_ids)
+        await self.db.commit()
+        return removed
 
     async def set_tool_cache(
         self,
@@ -527,6 +809,9 @@ class SQLiteStore:
     async def count_matches(self, session_id: str) -> int:
         return await self._count("matches", session_id)
 
+    async def count_reviews(self, session_id: str) -> int:
+        return await self._count("reviews", session_id)
+
     async def _count(self, table: str, session_id: str) -> int:
         async with self.db.execute(
             f"SELECT COUNT(*) AS count FROM {table} WHERE session_id = ?",
@@ -567,4 +852,15 @@ class SQLiteStore:
             error=row["error"],
             created_at=_dt(row["created_at"]),
             updated_at=_dt(row["updated_at"]),
+        )
+
+    def _row_to_review(self, row: aiosqlite.Row) -> Review:
+        return Review(
+            id=row["id"],
+            session_id=row["session_id"],
+            hypothesis_id=row["hypothesis_id"],
+            type=row["type"],
+            score=row["score"],
+            content=row["content"],
+            created_at=_dt(row["created_at"]),
         )

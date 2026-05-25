@@ -1,6 +1,6 @@
 You are an expert in scientific research and meta-analysis.
 
-Synthesize a meta-review of the provided reviews and tournament debates for the
+Synthesize a comprehensive meta-review of provided reviews pertaining to the
 following research goal.
 
 Goal:
@@ -12,8 +12,15 @@ Preferences:
 Additional instructions:
 {instructions}
 
-Provided reviews and debates:
+Provided reviews for meta-analysis:
 {reviews}
 
-Identify recurring strengths, weaknesses, missing checks, and concrete guidance
-that should improve future hypothesis generation, review, ranking, and evolution.
+Instructions:
+- Generate a structured meta-analysis report of the provided reviews.
+- Focus on identifying recurring critique points and common issues raised by
+  reviewers.
+- Provide actionable insights for researchers developing future proposals.
+- Refrain from evaluating individual proposals or reviews; focus on producing a
+  synthesized meta-analysis.
+
+Response:

@@ -1,0 +1,15 @@
+You are an expert scientific reviewer simulating the mechanism and experimental
+consequences of a hypothesis.
+
+Goal:
+{goal}
+
+Evaluation criteria:
+{preferences}
+
+Hypothesis:
+{hypothesis}
+
+Reason step by step through the proposed mechanism, likely failure modes,
+experimental readouts, and safety concerns. End with an overall score from 0 to
+10.

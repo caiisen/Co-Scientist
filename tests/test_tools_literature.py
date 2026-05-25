@@ -7,7 +7,11 @@ import pytest
 
 from co_scientist.config import SearchConfig
 from co_scientist.memory import SQLiteStore
-from co_scientist.tools.literature import dedupe_documents, search_literature
+from co_scientist.tools.literature import (
+    dedupe_documents,
+    search_literature,
+    search_literature_with_fallbacks,
+)
 from co_scientist.tools.models import Citation, SearchDocument, ToolResult, ToolStatus
 
 
@@ -165,3 +169,26 @@ async def test_search_literature_does_not_swallow_source_code_bugs() -> None:
             ),
             source_searchers={"pubmed": buggy_searcher},
         )
+
+
+@pytest.mark.asyncio
+async def test_search_literature_with_fallbacks_uses_later_query(tmp_path: Path) -> None:
+    calls = []
+
+    async def pubmed_search(query: str, *, max_results: int):
+        calls.append(query)
+        documents = [] if query == "too narrow" else [document("pubmed", "Fallback", pmid="1")]
+        return ToolResult.from_documents(source="pubmed", documents=documents)
+
+    result = await search_literature_with_fallbacks(
+        ["too narrow", "broader query"],
+        config=SearchConfig(
+            max_results=1,
+            semantic_scholar_enabled=False,
+            tavily_enabled=False,
+        ),
+        source_searchers={"pubmed": pubmed_search},
+    )
+
+    assert calls == ["too narrow", "broader query"]
+    assert result.documents[0].title == "Fallback"

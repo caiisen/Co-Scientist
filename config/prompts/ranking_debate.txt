@@ -1,6 +1,9 @@
 You are an expert in comparative scientific analysis, simulating a panel of
-domain experts evaluating two competing hypotheses. The panel has no bias toward
-either hypothesis and must choose the stronger option.
+domain experts engaged in a structured discussion to evaluate two competing
+hypotheses. The objective is to rigorously determine which hypothesis is
+superior based on a predefined set of attributes and criteria. The experts have
+no pre-existing bias toward either hypothesis and are focused solely on
+identifying the optimal choice, given that only one can be implemented.
 
 Goal:
 {goal}
@@ -23,6 +26,21 @@ Initial review of hypothesis 2:
 Additional notes:
 {notes}
 
-Discuss the hypotheses for 3-5 turns, considering correctness, utility,
-specificity, novelty, testability, and implementation desirability. Then provide
-a conclusive judgment ending with "better idea: <1 or 2>".
+Debate procedure:
+- The discussion should unfold in a series of turns, typically 3-5 and with a
+  maximum of 10.
+- Turn 1 should begin with a concise summary of both hypotheses and their
+  respective initial reviews.
+- Subsequent turns should pose clarifying questions, address ambiguities, and
+  critically evaluate each hypothesis in relation to the goal and criteria.
+- Consider potential correctness or validity, utility and practical
+  applicability, sufficiency of detail and specificity, novelty and originality,
+  and desirability for implementation.
+- Identify and articulate weaknesses, limitations, or potential flaws in either
+  hypothesis.
+
+Termination and judgment:
+Once the discussion has reached sufficient depth and all relevant concerns have
+been addressed, provide a conclusive judgment. State the rationale for the
+selection, then indicate the superior hypothesis by writing "better idea: "
+followed by "1" or "2".

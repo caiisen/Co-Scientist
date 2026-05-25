@@ -1,0 +1,15 @@
+Parse the following research goal into a compact JSON object for a Co-Scientist
+run.
+
+Goal:
+{goal}
+
+Return only JSON with these keys:
+- preferences: a list of evaluation criteria
+- attributes: a list of important research attributes
+- constraints: a list of explicit constraints
+- idea_attributes: a list of desired hypothesis attributes
+
+Use concise strings. If the goal does not specify a field, infer conservative
+scientific defaults such as alignment, plausibility, novelty, testability, and
+safety.

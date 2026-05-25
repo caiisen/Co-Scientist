@@ -7,6 +7,16 @@ CREATE TABLE IF NOT EXISTS sessions (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS research_plans (
+  session_id TEXT PRIMARY KEY REFERENCES sessions(id) ON DELETE CASCADE,
+  goal TEXT NOT NULL,
+  preferences TEXT NOT NULL DEFAULT '[]',
+  attributes TEXT NOT NULL DEFAULT '[]',
+  constraints TEXT NOT NULL DEFAULT '[]',
+  idea_attributes TEXT NOT NULL DEFAULT '[]',
+  created_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS hypotheses (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -88,6 +98,7 @@ CREATE TABLE IF NOT EXISTS overview (
 CREATE TABLE IF NOT EXISTS citations (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   session_id TEXT REFERENCES sessions(id) ON DELETE CASCADE,
+  dedupe_key TEXT,
   source TEXT NOT NULL,
   title TEXT NOT NULL,
   url TEXT,
@@ -102,6 +113,21 @@ CREATE TABLE IF NOT EXISTS citations (
 
 CREATE INDEX IF NOT EXISTS idx_citations_session_source
   ON citations(session_id, source);
+
+CREATE TABLE IF NOT EXISTS citation_links (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  citation_id INTEGER NOT NULL REFERENCES citations(id) ON DELETE CASCADE,
+  artifact_type TEXT NOT NULL,
+  artifact_id INTEGER NOT NULL,
+  source_task_id INTEGER REFERENCES tasks(id) ON DELETE SET NULL,
+  evidence_index INTEGER NOT NULL,
+  created_at TEXT NOT NULL,
+  UNIQUE(session_id, citation_id, artifact_type, artifact_id, evidence_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_citation_links_artifact
+  ON citation_links(session_id, artifact_type, artifact_id);
 
 CREATE TABLE IF NOT EXISTS tool_cache (
   cache_key TEXT PRIMARY KEY,

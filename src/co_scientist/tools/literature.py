@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
+import aiohttp
+
 from co_scientist.config import SearchConfig
 from co_scientist.memory.store import SQLiteStore
 from co_scientist.tools import arxiv, pubmed, semantic_scholar, web_search
@@ -21,6 +23,7 @@ async def search_literature(
     store: SQLiteStore | None = None,
     session_id: str | None = None,
     persist_citations: bool = True,
+    http_session: aiohttp.ClientSession | None = None,
     source_searchers: dict[str, SearchCallable] | None = None,
 ) -> ToolResult:
     cfg = config or SearchConfig(max_results=5)
@@ -62,7 +65,16 @@ async def search_literature(
 
     if misses:
         results = await asyncio.gather(
-            *[searcher(query, max_results=source_limit) for _, source_limit, searcher, _ in misses]
+            *[
+                _call_searcher(
+                    source,
+                    searcher,
+                    query,
+                    max_results=source_limit,
+                    http_session=http_session,
+                )
+                for source, source_limit, searcher, _ in misses
+            ]
         )
         for (source, source_limit, _, options), result in zip(misses, results, strict=True):
             if cache:
@@ -91,6 +103,48 @@ async def search_literature(
         citations=[document.citation for document in deduped],
         errors=errors,
     )
+
+
+async def search_literature_with_fallbacks(
+    queries: list[str],
+    **kwargs,
+) -> ToolResult:
+    first_result: ToolResult | None = None
+    errors: list[str] = []
+    seen: set[str] = set()
+    for query in queries:
+        normalized = " ".join(query.split())
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        result = await search_literature(normalized, **kwargs)
+        if first_result is None:
+            first_result = result
+        if result.documents:
+            return result
+        errors.extend(f"{normalized}: {error}" for error in result.errors)
+    if first_result is not None:
+        if errors:
+            first_result.errors.extend(errors)
+        return first_result
+    return ToolResult(
+        source="literature",
+        status=ToolStatus.FAILED,
+        errors=["no literature queries provided"],
+    )
+
+
+async def _call_searcher(
+    source: str,
+    searcher: SearchCallable,
+    query: str,
+    *,
+    max_results: int,
+    http_session: aiohttp.ClientSession | None,
+) -> ToolResult:
+    if http_session is not None and source in {"semantic_scholar", "arxiv"}:
+        return await searcher(query, max_results=max_results, session=http_session)
+    return await searcher(query, max_results=max_results)
 
 
 def _merge_source_result(

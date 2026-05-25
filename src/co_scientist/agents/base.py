@@ -5,6 +5,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any
 
+import aiohttp
+
 from co_scientist.config import AppConfig
 from co_scientist.llm.client import ChatMessage, LLMClient, LLMRouter
 from co_scientist.memory.models import Task
@@ -23,6 +25,7 @@ class AgentContext:
     session_id: str
     tools: Mapping[str, ToolCallable] = field(default_factory=dict)
     current_feedback: str | None = None
+    http_session: aiohttp.ClientSession | None = None
     prompt_store: PromptTemplateStore = field(default_factory=PromptTemplateStore)
 
     def llm_for(self, agent_name: str | None = None) -> LLMClient:
@@ -74,4 +77,3 @@ class Agent(ABC):
         **kwargs: Any,
     ) -> str:
         return await ctx.llm_for(self.name).chat(messages, **kwargs)
-

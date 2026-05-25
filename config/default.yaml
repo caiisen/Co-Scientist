@@ -56,16 +56,4 @@ llm:
       embedding_model: text-embedding-3-small
       temperature: 0.4
       max_tokens: 4096
-  agents:
-    generation:
-      provider: openai
-    reflection:
-      provider: openai
-    ranking:
-      provider: openai
-    proximity:
-      provider: openai
-    evolution:
-      provider: openai
-    metareview:
-      provider: openai
+  agents: {}
