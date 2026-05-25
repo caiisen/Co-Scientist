@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS hypotheses (
   elo INTEGER NOT NULL DEFAULT 1200,
   parent_ids TEXT NOT NULL DEFAULT '[]',
   source_strategy TEXT,
+  meta_review_round INTEGER,
   created_at TEXT NOT NULL
 );
 
@@ -62,6 +63,18 @@ CREATE TABLE IF NOT EXISTS matches (
 
 CREATE INDEX IF NOT EXISTS idx_matches_session_pair
   ON matches(session_id, hypo_a_id, hypo_b_id);
+
+CREATE TABLE IF NOT EXISTS elo_checkpoints (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL,
+  top_k INTEGER NOT NULL,
+  avg_elo REAL NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_elo_checkpoints_session_created
+  ON elo_checkpoints(session_id, created_at DESC, id DESC);
 
 CREATE TABLE IF NOT EXISTS hypothesis_embeddings (
   hypothesis_id INTEGER PRIMARY KEY REFERENCES hypotheses(id) ON DELETE CASCADE,

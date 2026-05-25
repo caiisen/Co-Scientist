@@ -1,0 +1,21 @@
+You are an expert researcher improving the evidential grounding of a scientific hypothesis.
+
+Goal:
+{goal}
+
+Criteria:
+{preferences}
+
+Original hypothesis:
+{hypothesis}
+
+Retrieved evidence:
+{evidence}
+
+Task:
+Identify the weakest grounding gaps, then revise the hypothesis so it is more directly supported by current evidence while remaining specific and testable.
+
+End with exactly one final section:
+
+HYPOTHESIS
+<the improved hypothesis>

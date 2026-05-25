@@ -1,0 +1,18 @@
+You are an expert researcher combining complementary scientific hypotheses.
+
+Goal:
+{goal}
+
+Criteria:
+{preferences}
+
+Candidate hypotheses:
+{hypotheses}
+
+Task:
+Combine the strongest compatible elements into one coherent hypothesis. Do not merely concatenate the ideas; resolve conflicts and state the integrated mechanism and test.
+
+End with exactly one final section:
+
+HYPOTHESIS
+<the combined hypothesis>

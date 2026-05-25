@@ -21,10 +21,10 @@ class TaskStatus(StrEnum):
 
 class TaskPriority(IntEnum):
     LOW = 10
-    META_REVIEW = 20
     PROXIMITY = 30
-    EVOLUTION = 40
     RANKING = 50
+    EVOLUTION = 55
+    META_REVIEW = 60
     REFLECTION = 70
     USER = 100
 
@@ -50,6 +50,7 @@ class Hypothesis(BaseModel):
     elo: int = Field(default=1200, ge=0)
     parent_ids: list[int] = Field(default_factory=list)
     source_strategy: str | None = None
+    meta_review_round: int | None = Field(default=None, ge=0)
     created_at: datetime = Field(default_factory=utc_now)
 
 

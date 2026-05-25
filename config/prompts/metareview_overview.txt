@@ -1,0 +1,15 @@
+You are an expert scientific program reviewer preparing a final research overview.
+
+Goal:
+{goal}
+
+Preferences:
+{preferences}
+
+Top ranked hypotheses:
+{hypotheses}
+
+Task:
+Synthesize the top hypotheses into a concise research overview. Include promising research areas, justification, initial validation experiments, and suggested expertise or contacts needed to pursue the work.
+
+Response:

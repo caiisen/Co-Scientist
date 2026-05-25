@@ -94,10 +94,29 @@ class SQLiteStore:
 
     async def _migrate_schema(self) -> None:
         await self._ensure_column("citations", "dedupe_key", "TEXT")
+        await self._ensure_column("hypotheses", "meta_review_round", "INTEGER")
         await self.db.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_matches_session_pair
               ON matches(session_id, hypo_a_id, hypo_b_id)
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS elo_checkpoints (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              match_id INTEGER REFERENCES matches(id) ON DELETE SET NULL,
+              top_k INTEGER NOT NULL,
+              avg_elo REAL NOT NULL,
+              created_at TEXT NOT NULL
+            )
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_elo_checkpoints_session_created
+              ON elo_checkpoints(session_id, created_at DESC, id DESC)
             """
         )
         await self.db.execute(
@@ -254,9 +273,10 @@ class SQLiteStore:
             INSERT INTO hypotheses (
               session_id, content, summary, detailed_description, mechanism,
               impacted_pathways, experimental_plan, safety_notes,
-              testable_predictions, elo, parent_ids, source_strategy, created_at
+              testable_predictions, elo, parent_ids, source_strategy,
+              meta_review_round, created_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 hypothesis.session_id,
@@ -271,6 +291,7 @@ class SQLiteStore:
                 hypothesis.elo,
                 _json_dumps(hypothesis.parent_ids),
                 hypothesis.source_strategy,
+                hypothesis.meta_review_round,
                 _dt_text(hypothesis.created_at),
             ),
         )
@@ -717,6 +738,22 @@ class SQLiteStore:
         await self.db.commit()
         return feedback.model_copy(update={"id": cursor.lastrowid})
 
+    async def latest_feedback(self, session_id: str) -> SystemFeedback | None:
+        async with self.db.execute(
+            """
+            SELECT * FROM feedback
+            WHERE session_id = ?
+            ORDER BY round DESC, id DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return self._row_to_feedback(row) if row else None
+
+    async def count_feedback(self, session_id: str) -> int:
+        return await self._count("feedback", session_id)
+
     async def add_overview(self, overview: ResearchOverview) -> ResearchOverview:
         cursor = await self.db.execute(
             """
@@ -733,6 +770,92 @@ class SQLiteStore:
         )
         await self.db.commit()
         return overview.model_copy(update={"id": cursor.lastrowid})
+
+    async def latest_overview(self, session_id: str) -> ResearchOverview | None:
+        async with self.db.execute(
+            """
+            SELECT * FROM overview
+            WHERE session_id = ?
+            ORDER BY round DESC, id DESC
+            LIMIT 1
+            """,
+            (session_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return self._row_to_overview(row) if row else None
+
+    async def recent_reviews(self, session_id: str, *, limit: int = 20) -> list[Review]:
+        async with self.db.execute(
+            """
+            SELECT * FROM reviews
+            WHERE session_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._row_to_review(row) for row in rows]
+
+    async def recent_matches(self, session_id: str, *, limit: int = 20) -> list[Match]:
+        async with self.db.execute(
+            """
+            SELECT * FROM matches
+            WHERE session_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [self._row_to_match(row) for row in rows]
+
+    async def add_elo_checkpoint(
+        self,
+        session_id: str,
+        *,
+        match_id: int | None = None,
+        top_k: int = 5,
+    ) -> dict[str, Any] | None:
+        top = await self.top_k_by_elo(session_id, k=top_k)
+        if not top:
+            return None
+        avg_elo = sum(hypothesis.elo for hypothesis in top) / len(top)
+        now = _dt_text(utc_now())
+        cursor = await self.db.execute(
+            """
+            INSERT INTO elo_checkpoints (session_id, match_id, top_k, avg_elo, created_at)
+            VALUES (?, ?, ?, ?, ?)
+            """,
+            (session_id, match_id, top_k, avg_elo, now),
+        )
+        await self.db.commit()
+        return {
+            "id": int(cursor.lastrowid),
+            "session_id": session_id,
+            "match_id": match_id,
+            "top_k": top_k,
+            "avg_elo": avg_elo,
+            "created_at": now,
+        }
+
+    async def latest_elo_checkpoints(
+        self,
+        session_id: str,
+        *,
+        limit: int = 4,
+    ) -> list[dict[str, Any]]:
+        async with self.db.execute(
+            """
+            SELECT * FROM elo_checkpoints
+            WHERE session_id = ?
+            ORDER BY created_at DESC, id DESC
+            LIMIT ?
+            """,
+            (session_id, limit),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [dict(row) for row in rows]
 
     async def add_citation(
         self,
@@ -1090,6 +1213,7 @@ class SQLiteStore:
             elo=row["elo"],
             parent_ids=_json_loads(row["parent_ids"], []),
             source_strategy=row["source_strategy"],
+            meta_review_round=row["meta_review_round"],
             created_at=_dt(row["created_at"]),
         )
 
@@ -1117,5 +1241,35 @@ class SQLiteStore:
             type=row["type"],
             score=row["score"],
             content=row["content"],
+            created_at=_dt(row["created_at"]),
+        )
+
+    def _row_to_match(self, row: aiosqlite.Row) -> Match:
+        return Match(
+            id=row["id"],
+            session_id=row["session_id"],
+            hypo_a_id=row["hypo_a_id"],
+            hypo_b_id=row["hypo_b_id"],
+            winner_id=row["winner_id"],
+            transcript=row["transcript"],
+            created_at=_dt(row["created_at"]),
+        )
+
+    def _row_to_feedback(self, row: aiosqlite.Row) -> SystemFeedback:
+        return SystemFeedback(
+            id=row["id"],
+            session_id=row["session_id"],
+            round=row["round"],
+            content=row["content"],
+            created_at=_dt(row["created_at"]),
+        )
+
+    def _row_to_overview(self, row: aiosqlite.Row) -> ResearchOverview:
+        return ResearchOverview(
+            id=row["id"],
+            session_id=row["session_id"],
+            round=row["round"],
+            content=row["content"],
+            top_hypothesis_ids=_json_loads(row["top_hypothesis_ids"], []),
             created_at=_dt(row["created_at"]),
         )

@@ -3,6 +3,8 @@ runtime:
   max_matches_per_idea: 5
   worker_concurrency: 4
   request_timeout_seconds: 60
+  elo_stagnation_threshold: 5.0
+  elo_stagnation_window: 4
 
 search:
   tavily_enabled: true

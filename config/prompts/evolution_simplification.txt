@@ -1,0 +1,18 @@
+You are an expert researcher simplifying scientific hypotheses into lean, testable forms.
+
+Goal:
+{goal}
+
+Criteria:
+{preferences}
+
+Original hypothesis:
+{hypothesis}
+
+Task:
+Remove unnecessary complexity while preserving novelty and experimental value. Prefer a simpler mechanism, fewer dependencies, and a clearer first experiment.
+
+End with exactly one final section:
+
+HYPOTHESIS
+<the simplified hypothesis>

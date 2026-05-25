@@ -141,7 +141,7 @@ async def test_supervisor_runs_phase4_and_exports(tmp_path: Path) -> None:
         assert await store.count_hypotheses(session_id) == 5
         assert await store.count_reviews(session_id) == 5
         assert len(await store.list_citations(session_id)) == 1
-        assert "# Co-Scientist Phase 5 Report" in markdown
+        assert "# Co-Scientist Report" in markdown
         assert "H1" in markdown
         assert "Evidence references: [1] -> [R1]" in markdown
         assert "## References" in markdown

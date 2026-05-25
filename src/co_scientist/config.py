@@ -18,6 +18,8 @@ class RuntimeConfig(BaseModel):
     max_matches_per_idea: int = Field(gt=0)
     worker_concurrency: int = Field(gt=0)
     request_timeout_seconds: int = Field(gt=0)
+    elo_stagnation_threshold: float = Field(default=5.0, ge=0)
+    elo_stagnation_window: int = Field(default=4, ge=2)
 
 
 class SearchConfig(BaseModel):

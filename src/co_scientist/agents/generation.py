@@ -262,11 +262,14 @@ def _hypothesis_result(
 
 
 def hypothesis_from_payload(session_id: str, payload: dict[str, Any]) -> Hypothesis:
+    raw_round = payload.get("meta_review_round")
     return Hypothesis(
         session_id=session_id,
         content=str(payload["content"]),
         summary=str(payload["summary"]),
         source_strategy=str(payload["source_strategy"]),
+        parent_ids=[int(parent_id) for parent_id in payload.get("parent_ids", [])],
+        meta_review_round=int(raw_round) if raw_round is not None else None,
     )
 
 

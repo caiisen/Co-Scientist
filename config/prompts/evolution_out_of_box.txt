@@ -23,3 +23,7 @@ inspiration, not direct replication:
 {hypotheses}
 
 Response:
+End with exactly one final section:
+
+HYPOTHESIS
+<the new hypothesis>

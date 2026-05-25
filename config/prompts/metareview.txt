@@ -9,11 +9,14 @@ Goal:
 Preferences:
 {preferences}
 
-Additional instructions:
-{instructions}
+Previous compressed feedback (carry forward only actionable recurring issues):
+{previous_feedback}
 
 Provided reviews for meta-analysis:
 {reviews}
+
+Recent tournament matches (use only as supporting context for what wins):
+{matches}
 
 Instructions:
 - Generate a structured meta-analysis report of the provided reviews.
@@ -22,5 +25,6 @@ Instructions:
 - Provide actionable insights for researchers developing future proposals.
 - Refrain from evaluating individual proposals or reviews; focus on producing a
   synthesized meta-analysis.
+- Compress into concise system-wide feedback for future agents.
 
 Response:

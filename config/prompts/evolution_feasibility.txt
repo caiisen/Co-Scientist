@@ -24,3 +24,7 @@ Original conceptualization:
 {hypothesis}
 
 Response:
+End with exactly one final section:
+
+HYPOTHESIS
+<the refined hypothesis>

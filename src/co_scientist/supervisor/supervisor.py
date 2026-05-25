@@ -9,7 +9,13 @@ from typing import Any
 import aiohttp
 
 from co_scientist.agents.base import Agent, AgentContext
+from co_scientist.agents.evolution import EvolutionAgent
 from co_scientist.agents.generation import GenerationAgent, hypothesis_from_payload
+from co_scientist.agents.metareview import (
+    MetaReviewAgent,
+    feedback_from_payload,
+    overview_from_payload,
+)
 from co_scientist.agents.proximity import ProximityAgent
 from co_scientist.agents.ranking import RankingAgent
 from co_scientist.agents.reflection import ReflectionAgent, review_from_payload
@@ -44,6 +50,8 @@ class Supervisor:
             "reflection": ReflectionAgent(),
             "proximity": ProximityAgent(),
             "ranking": RankingAgent(),
+            "evolution": EvolutionAgent(),
+            "metareview": MetaReviewAgent(),
         }
 
     async def start(self, goal: str) -> str:
@@ -63,6 +71,7 @@ class Supervisor:
             timeout=aiohttp.ClientTimeout(total=self.config.runtime.request_timeout_seconds)
         ) as http_session:
             ctx = self._context(session.id, http_session=http_session)
+            await self._refresh_current_feedback(ctx)
             self._log("[phase:planner] creating research plan")
             plan = await create_research_plan(goal, ctx)
             self._log(
@@ -96,6 +105,7 @@ class Supervisor:
             timeout=aiohttp.ClientTimeout(total=self.config.runtime.request_timeout_seconds)
         ) as http_session:
             ctx = self._context(session_id, http_session=http_session)
+            await self._refresh_current_feedback(ctx)
             if await self.store.get_research_plan(session_id) is None:
                 self._log("[phase:planner] missing plan; creating research plan")
                 plan = await create_research_plan(session.goal, ctx)
@@ -117,6 +127,8 @@ class Supervisor:
         if session is None:
             raise ValueError(f"unknown session: {session_id}")
         plan = await self.store.get_research_plan(session_id)
+        latest_feedback = await self.store.latest_feedback(session_id)
+        latest_overview = await self.store.latest_overview(session_id)
         hypotheses = await self.store.list_session_hypotheses(session_id)
         citations = await self.store.list_citations(session_id)
         reference_numbers = {
@@ -125,7 +137,7 @@ class Supervisor:
         }
 
         lines = [
-            f"# Co-Scientist Phase 5 Report: {session_id}",
+            f"# Co-Scientist Report: {session_id}",
             "",
             "## Goal",
             session.goal,
@@ -139,6 +151,29 @@ class Supervisor:
                     _list_section("Attributes", plan.attributes),
                     _list_section("Constraints", plan.constraints),
                     _list_section("Idea Attributes", plan.idea_attributes),
+                    "",
+                ]
+            )
+        if latest_overview is not None:
+            lines.extend(
+                [
+                    "## Final Research Overview",
+                    "",
+                    latest_overview.content,
+                    "",
+                    "Top hypothesis ids: "
+                    + _format_id_list(latest_overview.top_hypothesis_ids),
+                    "",
+                ]
+            )
+        if latest_feedback is not None:
+            lines.extend(
+                [
+                    "## Latest System Feedback",
+                    "",
+                    f"Round: `{latest_feedback.round}`",
+                    "",
+                    latest_feedback.content,
                     "",
                 ]
             )
@@ -157,6 +192,10 @@ class Supervisor:
             if hypothesis.id is None:
                 continue
             lines.append(f"Elo: `{hypothesis.elo}`")
+            if hypothesis.parent_ids:
+                lines.append(f"Parent hypothesis ids: `{_format_id_list(hypothesis.parent_ids)}`")
+            if hypothesis.meta_review_round is not None:
+                lines.append(f"Meta-review round: `{hypothesis.meta_review_round}`")
             reviews = await self.store.reviews_for_hypothesis(hypothesis.id)
             for review in reviews:
                 links = await self.store.citation_links_for_artifact(
@@ -224,6 +263,10 @@ class Supervisor:
             http_session=http_session,
         )
 
+    async def _refresh_current_feedback(self, ctx: AgentContext) -> None:
+        latest = await self.store.latest_feedback(ctx.session_id)
+        ctx.current_feedback = latest.content if latest else None
+
     async def _run_queue(self, queue: TaskQueue, ctx: AgentContext) -> None:
         workers = [
             asyncio.create_task(self._run_worker(queue, ctx))
@@ -260,7 +303,7 @@ class Supervisor:
                 f"payload={_compact_json(_summarize_payload(result.payload))} "
                 f"raw={_truncate(result.raw_text or '')}"
             )
-            await self._handle_result(queue, task, result)
+            await self._handle_result(queue, task, result, ctx)
             self._log(f"[task:done] id={task.id} {_task_name(task)}")
         except Exception as exc:
             if task.id is None:
@@ -276,6 +319,7 @@ class Supervisor:
         queue: TaskQueue,
         task: Task,
         result: AgentResult,
+        ctx: AgentContext | None = None,
     ) -> None:
         if task.id is None:
             raise ValueError("stored task must have id")
@@ -316,6 +360,19 @@ class Supervisor:
                         self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
         elif result.kind == AgentResultKind.PROXIMITY_UPDATED:
             await self._maybe_enqueue_ranking(queue, task.session_id, exclude_task_id=task.id)
+        elif result.kind == AgentResultKind.FEEDBACK_GENERATED:
+            stored_feedback = await self.store.add_feedback(
+                feedback_from_payload(task.session_id, result.payload)
+            )
+            stored_ids = [stored_feedback.id] if stored_feedback.id is not None else []
+            if ctx is not None:
+                ctx.current_feedback = stored_feedback.content
+            await self._maybe_enqueue_evolution(queue, task.session_id, exclude_task_id=task.id)
+        elif result.kind == AgentResultKind.OVERVIEW_GENERATED:
+            stored_overview = await self.store.add_overview(
+                overview_from_payload(task.session_id, result.payload)
+            )
+            stored_ids = [stored_overview.id] if stored_overview.id is not None else []
         ranking_audit: dict[str, Any] = {}
         if result.kind == AgentResultKind.RANKING_DECISION:
             stored_match = await self.store.add_match_and_update_elo(
@@ -334,7 +391,25 @@ class Supervisor:
                 "hypo_b_id": result.payload.get("hypo_b_id"),
                 "winner_id": result.payload.get("winner_id"),
             }
-            await self._maybe_enqueue_ranking(queue, task.session_id, exclude_task_id=task.id)
+            checkpoint = await self.store.add_elo_checkpoint(
+                task.session_id,
+                match_id=stored_match.id,
+                top_k=5,
+            )
+            if checkpoint is not None:
+                ranking_audit["elo_checkpoint_id"] = checkpoint["id"]
+            if await self._maybe_enqueue_metareview_for_stale_elo(
+                queue,
+                task.session_id,
+                exclude_task_id=task.id,
+            ):
+                ranking_audit["queued_followup"] = "metareview.generate_system_feedback"
+            else:
+                await self._maybe_enqueue_ranking(
+                    queue,
+                    task.session_id,
+                    exclude_task_id=task.id,
+                )
 
         await queue.mark_done(
             task.id,
@@ -387,6 +462,18 @@ class Supervisor:
         if "ranking" not in self.agents:
             return
         if await self._ranking_target_reached(session_id):
+            if await self.store.count_hypotheses(session_id) < self.config.runtime.max_ideas:
+                await self._maybe_enqueue_metareview_or_evolution(
+                    queue,
+                    session_id,
+                    exclude_task_id=exclude_task_id,
+                )
+                return
+            await self._maybe_enqueue_final_overview(
+                queue,
+                session_id,
+                exclude_task_id=exclude_task_id,
+            )
             return
         enqueued = await queue.enqueue_unique_action(
             Task(
@@ -399,6 +486,170 @@ class Supervisor:
         )
         if enqueued is not None:
             self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
+
+    async def _maybe_enqueue_metareview_for_stale_elo(
+        self,
+        queue: TaskQueue,
+        session_id: str,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> bool:
+        if "metareview" not in self.agents or "evolution" not in self.agents:
+            return False
+        if await self.store.count_hypotheses(session_id) >= self.config.runtime.max_ideas:
+            return False
+        if not await self._elo_stagnated(session_id):
+            return False
+        if await self.store.has_active_task(
+            session_id,
+            agent="evolution",
+            action="evolve_top_hypotheses",
+            exclude_task_id=exclude_task_id,
+        ):
+            return False
+        if await self.store.has_active_task(
+            session_id,
+            agent="metareview",
+            action="generate_system_feedback",
+            exclude_task_id=exclude_task_id,
+        ):
+            return True
+        enqueued = await queue.enqueue_unique_action(
+            Task(
+                session_id=session_id,
+                agent="metareview",
+                action="generate_system_feedback",
+                priority=int(TaskPriority.META_REVIEW),
+            ),
+            exclude_task_id=exclude_task_id,
+        )
+        if enqueued is not None:
+            self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
+            return True
+        return False
+
+    async def _maybe_enqueue_metareview_or_evolution(
+        self,
+        queue: TaskQueue,
+        session_id: str,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> None:
+        if "metareview" in self.agents:
+            if await self.store.has_active_task(
+                session_id,
+                agent="metareview",
+                action="generate_system_feedback",
+                exclude_task_id=exclude_task_id,
+            ):
+                return
+            enqueued = await queue.enqueue_unique_action(
+                Task(
+                    session_id=session_id,
+                    agent="metareview",
+                    action="generate_system_feedback",
+                    priority=int(TaskPriority.META_REVIEW),
+                ),
+                exclude_task_id=exclude_task_id,
+            )
+            if enqueued is not None:
+                self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
+                return
+        await self._maybe_enqueue_evolution(
+            queue,
+            session_id,
+            exclude_task_id=exclude_task_id,
+        )
+
+    async def _maybe_enqueue_evolution(
+        self,
+        queue: TaskQueue,
+        session_id: str,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> None:
+        if "evolution" not in self.agents:
+            return
+        if await self.store.count_hypotheses(session_id) >= self.config.runtime.max_ideas:
+            return
+        enqueued = await queue.enqueue_unique_action(
+            Task(
+                session_id=session_id,
+                agent="evolution",
+                action="evolve_top_hypotheses",
+                priority=int(TaskPriority.EVOLUTION),
+            ),
+            exclude_task_id=exclude_task_id,
+        )
+        if enqueued is not None:
+            self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
+
+    async def _maybe_enqueue_final_overview(
+        self,
+        queue: TaskQueue,
+        session_id: str,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> None:
+        if "metareview" not in self.agents:
+            return
+        if await self.store.count_hypotheses(session_id) < self.config.runtime.max_ideas:
+            return
+        if not await self._ranking_target_reached(session_id):
+            return
+        if await self._has_active_tournament_work(
+            session_id,
+            exclude_task_id=exclude_task_id,
+        ):
+            return
+        if await self.store.latest_overview(session_id) is not None:
+            return
+        enqueued = await queue.enqueue_unique_action(
+            Task(
+                session_id=session_id,
+                agent="metareview",
+                action="generate_final_overview",
+                priority=int(TaskPriority.META_REVIEW),
+            ),
+            exclude_task_id=exclude_task_id,
+        )
+        if enqueued is not None:
+            self._log(f"[queue] enqueued {_task_name(enqueued)} id={enqueued.id}")
+
+    async def _has_active_tournament_work(
+        self,
+        session_id: str,
+        *,
+        exclude_task_id: int | None = None,
+    ) -> bool:
+        checks = [
+            ("reflection", "full_review"),
+            ("proximity", "update_proximity_graph"),
+            ("ranking", "run_tournament_match"),
+            ("ranking", "run_tournament_batch"),
+        ]
+        for agent, action in checks:
+            if await self.store.has_active_task(
+                session_id,
+                agent=agent,
+                action=action,
+                exclude_task_id=exclude_task_id,
+            ):
+                return True
+        return False
+
+    async def _elo_stagnated(self, session_id: str) -> bool:
+        window = self.config.runtime.elo_stagnation_window
+        threshold = self.config.runtime.elo_stagnation_threshold
+        checkpoints = await self.store.latest_elo_checkpoints(session_id, limit=window)
+        if len(checkpoints) < window:
+            return False
+        ordered = list(reversed(checkpoints))
+        deltas = [
+            float(current["avg_elo"]) - float(previous["avg_elo"])
+            for previous, current in zip(ordered[:-1], ordered[1:], strict=True)
+        ]
+        return all(delta < threshold for delta in deltas)
 
     async def _ranking_target_reached(self, session_id: str) -> bool:
         hypotheses = await self.store.list_reviewed_hypotheses(session_id)
@@ -482,6 +733,10 @@ def _summarize_payload(payload: dict[str, Any]) -> dict[str, Any]:
 def _citations_from_payload(payload: dict[str, Any]) -> list[Citation]:
     citations = payload.get("citations") or []
     return [Citation.model_validate(citation) for citation in citations]
+
+
+def _format_id_list(ids: list[int]) -> str:
+    return ", ".join(str(item) for item in ids) if ids else "none"
 
 
 def _format_reference(index: int, citation: dict[str, Any]) -> str:

@@ -1,0 +1,18 @@
+You are an expert researcher deriving a new hypothesis from a strong existing idea.
+
+Goal:
+{goal}
+
+Criteria:
+{preferences}
+
+Source hypothesis:
+{hypothesis}
+
+Task:
+Use the source hypothesis as inspiration, but produce a distinct follow-on hypothesis with a different mechanism, target, experiment, or application path.
+
+End with exactly one final section:
+
+HYPOTHESIS
+<the inspired hypothesis>
