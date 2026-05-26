@@ -182,3 +182,21 @@ CREATE TABLE IF NOT EXISTS tool_cache (
 
 CREATE INDEX IF NOT EXISTS idx_tool_cache_expires
   ON tool_cache(expires_at);
+
+CREATE TABLE IF NOT EXISTS private_corpus_chunks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  path TEXT NOT NULL,
+  title TEXT NOT NULL,
+  chunk_index INTEGER NOT NULL,
+  content TEXT NOT NULL,
+  content_hash TEXT NOT NULL,
+  mtime REAL NOT NULL,
+  file_size INTEGER NOT NULL DEFAULT 0,
+  embedding_json TEXT,
+  updated_at TEXT NOT NULL,
+  UNIQUE(session_id, path, chunk_index)
+);
+
+CREATE INDEX IF NOT EXISTS idx_private_corpus_chunks_session
+  ON private_corpus_chunks(session_id);

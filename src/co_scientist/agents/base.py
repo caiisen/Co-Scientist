@@ -27,6 +27,7 @@ class AgentContext:
     current_feedback: str | None = None
     http_session: aiohttp.ClientSession | None = None
     prompt_store: PromptTemplateStore = field(default_factory=PromptTemplateStore)
+    metrics_sink: Any | None = None
 
     def llm_for(self, agent_name: str | None = None) -> LLMClient:
         return self.llm_router.client_for(agent_name)
@@ -76,4 +77,23 @@ class Agent(ABC):
         messages: list[ChatMessage],
         **kwargs: Any,
     ) -> str:
-        return await ctx.llm_for(self.name).chat(messages, **kwargs)
+        client = ctx.llm_for(self.name)
+        if hasattr(client, "chat_with_metadata"):
+            result = await client.chat_with_metadata(messages, **kwargs)
+            text = result.text
+            metadata = result.metadata
+        else:
+            text = await client.chat(messages, **kwargs)
+            metadata = getattr(client, "last_call", None)
+        if ctx.metrics_sink is not None and metadata is not None:
+            ctx.metrics_sink.emit(
+                ctx.session_id,
+                "llm.chat",
+                agent=self.name,
+                model=metadata.model,
+                latency_seconds=metadata.latency_seconds,
+                prompt_tokens=metadata.prompt_tokens,
+                completion_tokens=metadata.completion_tokens,
+                total_tokens=metadata.total_tokens,
+            )
+        return text

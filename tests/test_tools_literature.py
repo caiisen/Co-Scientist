@@ -192,3 +192,77 @@ async def test_search_literature_with_fallbacks_uses_later_query(tmp_path: Path)
 
     assert calls == ["too narrow", "broader query"]
     assert result.documents[0].title == "Fallback"
+
+
+@pytest.mark.asyncio
+async def test_search_literature_includes_private_corpus_markdown(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "paper.md").write_text(
+        "# Cannabis latitude selection\n\n"
+        "High-latitude cannabis selection favored fiber traits and flowering timing. "
+        "Low-latitude populations retained medicinal chemotype variation.",
+        encoding="utf-8",
+    )
+
+    async with SQLiteStore(tmp_path / "private.sqlite") as store:
+        session = await store.create_session("goal")
+        result = await search_literature(
+            "high latitude cannabis fiber selection",
+            config=SearchConfig(
+                max_results=5,
+                tavily_enabled=False,
+                pubmed_enabled=False,
+                semantic_scholar_enabled=False,
+                arxiv_enabled=False,
+                private_corpus_enabled=True,
+                private_corpus_paths=[str(corpus_dir)],
+            ),
+            store=store,
+            session_id=session.id,
+        )
+        chunk_count = await store.count_private_corpus_chunks(session.id)
+
+    assert result.status == ToolStatus.OK
+    assert result.documents
+    assert result.documents[0].source == "private_corpus"
+    assert "Cannabis latitude selection" in result.documents[0].title
+    assert "chunk_id" not in result.documents[0].citation.raw_json
+    assert chunk_count >= 1
+
+
+class BrokenEmbeddingClient:
+    async def embed(self, texts):
+        raise RuntimeError("embedding unavailable")
+
+
+@pytest.mark.asyncio
+async def test_private_corpus_reports_embedding_fallback_as_degraded(tmp_path: Path) -> None:
+    corpus_dir = tmp_path / "corpus"
+    corpus_dir.mkdir()
+    (corpus_dir / "paper.txt").write_text(
+        "Cannabis fiber selection and latitude adaptation.",
+        encoding="utf-8",
+    )
+
+    async with SQLiteStore(tmp_path / "private_degraded.sqlite") as store:
+        session = await store.create_session("goal")
+        result = await search_literature(
+            "cannabis fiber latitude",
+            config=SearchConfig(
+                max_results=5,
+                tavily_enabled=False,
+                pubmed_enabled=False,
+                semantic_scholar_enabled=False,
+                arxiv_enabled=False,
+                private_corpus_enabled=True,
+                private_corpus_paths=[str(corpus_dir)],
+            ),
+            store=store,
+            session_id=session.id,
+            embedding_client=BrokenEmbeddingClient(),
+        )
+
+    assert result.status == ToolStatus.DEGRADED
+    assert result.documents
+    assert "embedding search failed" in result.errors[0]

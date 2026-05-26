@@ -33,6 +33,18 @@ class LLMCallMetadata:
     total_tokens: int | None = None
 
 
+@dataclass(frozen=True)
+class LLMChatResult:
+    text: str
+    metadata: LLMCallMetadata
+
+
+@dataclass(frozen=True)
+class LLMEmbeddingResult:
+    vectors: list[list[float]]
+    metadata: LLMCallMetadata
+
+
 class LLMClient:
     def __init__(
         self,
@@ -70,6 +82,29 @@ class LLMClient:
         max_tokens: int | None = None,
         **kwargs: Any,
     ) -> str:
+        return (await self.chat_with_metadata(
+            messages,
+            model=model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            **kwargs,
+        )).text
+
+    @retry(
+        retry=retry_if_exception_type(RETRYABLE_OPENAI_ERRORS),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    async def chat_with_metadata(
+        self,
+        messages: list[ChatMessage],
+        *,
+        model: str | None = None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **kwargs: Any,
+    ) -> LLMChatResult:
         selected_model = model or self.provider.chat_model
         started = time.monotonic()
         response = await self._client.chat.completions.create(
@@ -79,9 +114,10 @@ class LLMClient:
             max_tokens=self.provider.max_tokens if max_tokens is None else max_tokens,
             **kwargs,
         )
-        self.last_call = self._metadata_from_response(selected_model, started, response)
+        metadata = self._metadata_from_response(selected_model, started, response)
+        self.last_call = metadata
         content = response.choices[0].message.content
-        return content or ""
+        return LLMChatResult(text=content or "", metadata=metadata)
 
     @retry(
         retry=retry_if_exception_type(RETRYABLE_OPENAI_ERRORS),
@@ -96,6 +132,21 @@ class LLMClient:
         model: str | None = None,
         **kwargs: Any,
     ) -> list[list[float]]:
+        return (await self.embed_with_metadata(texts, model=model, **kwargs)).vectors
+
+    @retry(
+        retry=retry_if_exception_type(RETRYABLE_OPENAI_ERRORS),
+        wait=wait_exponential(multiplier=1, min=1, max=20),
+        stop=stop_after_attempt(3),
+        reraise=True,
+    )
+    async def embed_with_metadata(
+        self,
+        texts: list[str],
+        *,
+        model: str | None = None,
+        **kwargs: Any,
+    ) -> LLMEmbeddingResult:
         selected_model = model or self.provider.embedding_model
         if not selected_model:
             raise ValueError("no embedding model configured for this provider")
@@ -105,8 +156,12 @@ class LLMClient:
             input=texts,
             **kwargs,
         )
-        self.last_call = self._metadata_from_response(selected_model, started, response)
-        return [item.embedding for item in response.data]
+        metadata = self._metadata_from_response(selected_model, started, response)
+        self.last_call = metadata
+        return LLMEmbeddingResult(
+            vectors=[item.embedding for item in response.data],
+            metadata=metadata,
+        )
 
     def _metadata_from_response(
         self,

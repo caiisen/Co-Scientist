@@ -7,7 +7,7 @@ import aiohttp
 
 from co_scientist.config import SearchConfig
 from co_scientist.memory.store import SQLiteStore
-from co_scientist.tools import arxiv, pubmed, semantic_scholar, web_search
+from co_scientist.tools import arxiv, private_corpus, pubmed, semantic_scholar, web_search
 from co_scientist.tools.cache import ToolCache
 from co_scientist.tools.models import SearchDocument, ToolResult, ToolStatus
 
@@ -25,6 +25,7 @@ async def search_literature(
     persist_citations: bool = True,
     http_session: aiohttp.ClientSession | None = None,
     source_searchers: dict[str, SearchCallable] | None = None,
+    embedding_client: object | None = None,
 ) -> ToolResult:
     cfg = config or SearchConfig(max_results=5)
     limit = max_results or cfg.max_results
@@ -48,6 +49,9 @@ async def search_literature(
             continue
         source_limit = _source_limit(source, cfg, limit)
         options = {"domain": domain}
+        if source == "private_corpus":
+            misses.append((source, source_limit, searcher, options))
+            continue
         cached = (
             await cache.get(
                 source=source,
@@ -72,12 +76,16 @@ async def search_literature(
                     query,
                     max_results=source_limit,
                     http_session=http_session,
+                    config=cfg,
+                    store=store,
+                    session_id=session_id,
+                    embedding_client=embedding_client,
                 )
                 for source, source_limit, searcher, _ in misses
             ]
         )
         for (source, source_limit, _, options), result in zip(misses, results, strict=True):
-            if cache:
+            if cache and source != "private_corpus":
                 await cache.set(
                     source=source,
                     query=query,
@@ -141,7 +149,22 @@ async def _call_searcher(
     *,
     max_results: int,
     http_session: aiohttp.ClientSession | None,
+    config: SearchConfig,
+    store: SQLiteStore | None,
+    session_id: str | None,
+    embedding_client: object | None,
 ) -> ToolResult:
+    if source == "private_corpus":
+        if store is None or session_id is None:
+            return ToolResult(source="private_corpus")
+        return await searcher(
+            query,
+            max_results=max_results,
+            config=config,
+            store=store,
+            session_id=session_id,
+            embedding_client=embedding_client,
+        )
     if http_session is not None and source in {"semantic_scholar", "arxiv"}:
         return await searcher(query, max_results=max_results, session=http_session)
     return await searcher(query, max_results=max_results)
@@ -195,7 +218,10 @@ def _sources_for_domain(domain: str, config: SearchConfig) -> list[str]:
         "semantic_scholar": config.semantic_scholar_enabled,
         "arxiv": config.arxiv_enabled,
         "tavily": config.tavily_enabled,
+        "private_corpus": config.private_corpus_enabled,
     }
+    if config.private_corpus_enabled:
+        sources.append("private_corpus")
     return [source for source in sources if enabled[source]]
 
 
@@ -205,6 +231,7 @@ def _source_limit(source: str, config: SearchConfig, fallback: int) -> int:
         "semantic_scholar": config.semantic_scholar_max_results,
         "arxiv": config.arxiv_max_results,
         "tavily": config.tavily_max_results,
+        "private_corpus": config.private_corpus_max_results,
     }.get(source) or fallback
 
 
@@ -214,6 +241,7 @@ def _default_searchers() -> dict[str, SearchCallable]:
         "semantic_scholar": semantic_scholar.search,
         "arxiv": arxiv.search,
         "tavily": web_search.search,
+        "private_corpus": private_corpus.search,
     }
 
 

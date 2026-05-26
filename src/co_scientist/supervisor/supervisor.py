@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -24,6 +25,7 @@ from co_scientist.config import AppConfig
 from co_scientist.llm.client import LLMRouter
 from co_scientist.memory.models import Match, Task, TaskPriority
 from co_scientist.memory.store import SQLiteStore
+from co_scientist.supervisor.metrics import MetricsSink
 from co_scientist.supervisor.planner import create_research_plan
 from co_scientist.supervisor.task_queue import TaskQueue
 from co_scientist.tools.models import Citation
@@ -39,12 +41,17 @@ class Supervisor:
         agents: dict[str, Agent] | None = None,
         verbose: bool = False,
         event_sink: Callable[[str], None] | None = None,
+        metrics_sink: MetricsSink | None = None,
     ) -> None:
         self.store = store
         self.config = config
         self.llm_router = llm_router or LLMRouter(config.llm)
         self.verbose = verbose
         self.event_sink = event_sink or print
+        self.metrics_sink = metrics_sink or MetricsSink(
+            runs_dir=config.observability.runs_dir,
+            enabled=config.observability.metrics_enabled,
+        )
         self.agents = agents or {
             "generation": GenerationAgent(),
             "reflection": ReflectionAgent(),
@@ -64,6 +71,13 @@ class Supervisor:
             f"{session.id} max_ideas={self.config.runtime.max_ideas} "
             f"max_matches_per_idea={self.config.runtime.max_matches_per_idea} "
             f"workers={self.config.runtime.worker_concurrency}"
+        )
+        self.metrics_sink.emit(
+            session.id,
+            "session.start",
+            max_ideas=self.config.runtime.max_ideas,
+            max_matches_per_idea=self.config.runtime.max_matches_per_idea,
+            worker_concurrency=self.config.runtime.worker_concurrency,
         )
         self._log(f"[phase:start:input] goal={_truncate(goal)}")
         await self.store.purge_expired_tool_cache()
@@ -93,6 +107,7 @@ class Supervisor:
             self._log(f"[queue] enqueued {_task_name(task)} id={task.id}")
             await self._run_queue(queue, ctx)
         self._log(f"[phase:done] session={session.id}")
+        self.metrics_sink.emit(session.id, "session.done")
         return session.id
 
     async def resume(self, session_id: str) -> None:
@@ -100,6 +115,7 @@ class Supervisor:
         if session is None:
             raise ValueError(f"unknown session: {session_id}")
         self._log(f"[phase:resume] session={session_id}")
+        self.metrics_sink.emit(session_id, "session.resume")
         await self.store.purge_expired_tool_cache()
         async with aiohttp.ClientSession(
             timeout=aiohttp.ClientTimeout(total=self.config.runtime.request_timeout_seconds)
@@ -121,6 +137,7 @@ class Supervisor:
             self._log(f"[queue] loaded pending tasks count={queue.qsize()}")
             await self._run_queue(queue, ctx)
         self._log(f"[phase:done] session={session_id}")
+        self.metrics_sink.emit(session_id, "session.done")
 
     async def export_markdown(self, session_id: str) -> str:
         session = await self.store.get_session(session_id)
@@ -261,6 +278,7 @@ class Supervisor:
             config=self.config,
             session_id=session_id,
             http_session=http_session,
+            metrics_sink=self.metrics_sink,
         )
 
     async def _refresh_current_feedback(self, ctx: AgentContext) -> None:
@@ -291,9 +309,19 @@ class Supervisor:
 
     async def _run_one(self, queue: TaskQueue, ctx: AgentContext) -> None:
         task = await queue.dequeue()
+        started = time.monotonic()
         self._log(
             f"[task:start] id={task.id} {_task_name(task)} target={task.target_id} "
             f"input={_compact_json(task.payload_json)}"
+        )
+        self.metrics_sink.emit(
+            task.session_id,
+            "task.start",
+            task_id=task.id,
+            agent=task.agent,
+            action=task.action,
+            target_id=task.target_id,
+            payload=task.payload_json,
         )
         try:
             agent = self.agents[task.agent]
@@ -303,12 +331,35 @@ class Supervisor:
                 f"payload={_compact_json(_summarize_payload(result.payload))} "
                 f"raw={_truncate(result.raw_text or '')}"
             )
-            await self._handle_result(queue, task, result, ctx)
+            completion = await self._handle_result(queue, task, result, ctx)
+            event = "task.failed" if completion.get("task_status") == "failed" else "task.done"
+            self.metrics_sink.emit(
+                task.session_id,
+                event,
+                task_id=task.id,
+                agent=task.agent,
+                action=task.action,
+                target_id=task.target_id,
+                latency_seconds=time.monotonic() - started,
+                result_kind=result.kind.value,
+                citation_count=len(result.citations),
+                **completion,
+            )
             self._log(f"[task:done] id={task.id} {_task_name(task)}")
         except Exception as exc:
             if task.id is None:
                 raise
             await queue.mark_failed(task.id, str(exc))
+            self.metrics_sink.emit(
+                task.session_id,
+                "task.failed",
+                task_id=task.id,
+                agent=task.agent,
+                action=task.action,
+                target_id=task.target_id,
+                latency_seconds=time.monotonic() - started,
+                error=f"{type(exc).__name__}: {exc}",
+            )
             self._log(
                 f"[task:failed] id={task.id} {_task_name(task)} "
                 f"error={type(exc).__name__}: {_truncate(str(exc))}"
@@ -320,16 +371,17 @@ class Supervisor:
         task: Task,
         result: AgentResult,
         ctx: AgentContext | None = None,
-    ) -> None:
+    ) -> dict[str, Any]:
         if task.id is None:
             raise ValueError("stored task must have id")
         if not result.ok:
+            completion = _result_debug_json(result) | {"task_status": "failed"}
             await queue.mark_failed(
                 task.id,
                 result.parse_error or "agent parse error",
-                result_json=_result_debug_json(result),
+                result_json=completion,
             )
-            return
+            return completion
 
         stored_ids: list[int] = []
         if result.kind == AgentResultKind.HYPOTHESIS_CREATED:
@@ -411,10 +463,13 @@ class Supervisor:
                     exclude_task_id=task.id,
                 )
 
-        await queue.mark_done(
-            task.id,
-            _result_debug_json(result) | {"stored_ids": stored_ids} | ranking_audit,
+        completion = (
+            _result_debug_json(result)
+            | {"stored_ids": stored_ids, "task_status": "done"}
+            | ranking_audit
         )
+        await queue.mark_done(task.id, completion)
+        return completion
 
     async def _store_hypotheses_and_enqueue_reviews(
         self,

@@ -38,6 +38,24 @@ class SearchConfig(BaseModel):
     pubmed_max_results: int | None = Field(default=None, gt=0)
     semantic_scholar_max_results: int | None = Field(default=None, gt=0)
     arxiv_max_results: int | None = Field(default=None, gt=0)
+    private_corpus_enabled: bool = False
+    private_corpus_paths: list[str] = Field(default_factory=list)
+    private_corpus_max_results: int = Field(default=3, gt=0)
+    private_corpus_chunk_chars: int = Field(default=1600, gt=0)
+    private_corpus_chunk_overlap: int = Field(default=200, ge=0)
+
+    @field_validator("private_corpus_chunk_overlap")
+    @classmethod
+    def require_overlap_smaller_than_chunk(cls, value: int, info) -> int:
+        chunk_chars = info.data.get("private_corpus_chunk_chars")
+        if chunk_chars is not None and value >= chunk_chars:
+            raise ValueError("private_corpus_chunk_overlap must be smaller than chunk size")
+        return value
+
+
+class ObservabilityConfig(BaseModel):
+    metrics_enabled: bool = True
+    runs_dir: str = "runs"
 
 
 class ProviderConfig(BaseModel):
@@ -110,6 +128,7 @@ class AppConfig(BaseModel):
     runtime: RuntimeConfig
     search: SearchConfig
     llm: LLMConfig
+    observability: ObservabilityConfig = Field(default_factory=ObservabilityConfig)
 
 
 def load_yaml_file(path: Path) -> dict[str, Any]:

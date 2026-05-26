@@ -154,6 +154,34 @@ class SQLiteStore:
               ON proximity_edges(session_id, similarity DESC)
             """
         )
+        await self.db.execute(
+            """
+            CREATE TABLE IF NOT EXISTS private_corpus_chunks (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+              path TEXT NOT NULL,
+              title TEXT NOT NULL,
+              chunk_index INTEGER NOT NULL,
+              content TEXT NOT NULL,
+              content_hash TEXT NOT NULL,
+              mtime REAL NOT NULL,
+              embedding_json TEXT,
+              updated_at TEXT NOT NULL,
+              UNIQUE(session_id, path, chunk_index)
+            )
+            """
+        )
+        await self.db.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_private_corpus_chunks_session
+              ON private_corpus_chunks(session_id)
+            """
+        )
+        await self._ensure_column(
+            "private_corpus_chunks",
+            "file_size",
+            "INTEGER NOT NULL DEFAULT 0",
+        )
         await self.migrate_citation_dedupe_keys()
         session_ids = await self._session_ids_with_citations()
         for session_id in session_ids:
@@ -795,6 +823,128 @@ class SQLiteStore:
             (int(row["hypo_a_id"]), int(row["hypo_b_id"])): float(row["similarity"])
             for row in rows
         }
+
+    async def replace_private_corpus_file_chunks(
+        self,
+        *,
+        session_id: str,
+        path: str,
+        chunks: list[dict[str, Any]],
+    ) -> list[int]:
+        now = _dt_text(utc_now())
+        ids: list[int] = []
+        try:
+            await self.db.execute(
+                """
+                DELETE FROM private_corpus_chunks
+                WHERE session_id = ? AND path = ?
+                """,
+                (session_id, path),
+            )
+            for chunk in chunks:
+                cursor = await self.db.execute(
+                    """
+                    INSERT INTO private_corpus_chunks (
+                      session_id, path, title, chunk_index, content,
+                      content_hash, mtime, file_size, embedding_json, updated_at
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        session_id,
+                        path,
+                        chunk["title"],
+                        int(chunk["chunk_index"]),
+                        chunk["content"],
+                        chunk["content_hash"],
+                        float(chunk["mtime"]),
+                        int(chunk.get("file_size", 0)),
+                        (
+                            _json_dumps(chunk["embedding"])
+                            if chunk.get("embedding") is not None
+                            else None
+                        ),
+                        now,
+                    ),
+                )
+                ids.append(int(cursor.lastrowid))
+        except Exception:
+            await self.db.rollback()
+            raise
+        await self.db.commit()
+        return ids
+
+    async def private_corpus_file_state(
+        self,
+        *,
+        session_id: str,
+        path: str,
+    ) -> dict[str, Any] | None:
+        async with self.db.execute(
+            """
+            SELECT mtime, file_size, content_hash
+            FROM private_corpus_chunks
+            WHERE session_id = ? AND path = ?
+            ORDER BY chunk_index ASC
+            """,
+            (session_id, path),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        if not rows:
+            return None
+        return {
+            "mtime": float(rows[0]["mtime"]),
+            "file_size": int(rows[0]["file_size"]),
+            "content_hashes": [str(row["content_hash"]) for row in rows],
+        }
+
+    async def list_private_corpus_chunks(self, session_id: str) -> list[dict[str, Any]]:
+        async with self.db.execute(
+            """
+            SELECT *
+            FROM private_corpus_chunks
+            WHERE session_id = ?
+            ORDER BY path ASC, chunk_index ASC
+            """,
+            (session_id,),
+        ) as cursor:
+            rows = await cursor.fetchall()
+        return [
+            {
+                **dict(row),
+                "embedding": (
+                    [float(item) for item in _json_loads(row["embedding_json"], [])]
+                    if row["embedding_json"]
+                    else None
+                ),
+            }
+            for row in rows
+        ]
+
+    async def update_private_corpus_embeddings(
+        self,
+        *,
+        session_id: str,
+        embeddings: dict[int, list[float]],
+    ) -> None:
+        if not embeddings:
+            return
+        now = _dt_text(utc_now())
+        await self.db.executemany(
+            """
+            UPDATE private_corpus_chunks
+            SET embedding_json = ?, updated_at = ?
+            WHERE session_id = ? AND id = ?
+            """,
+            [
+                (_json_dumps(embedding), now, session_id, chunk_id)
+                for chunk_id, embedding in embeddings.items()
+            ],
+        )
+        await self.db.commit()
+
+    async def count_private_corpus_chunks(self, session_id: str) -> int:
+        return await self._count("private_corpus_chunks", session_id)
 
     async def add_feedback(self, feedback: SystemFeedback) -> SystemFeedback:
         cursor = await self.db.execute(

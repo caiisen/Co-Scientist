@@ -7,3 +7,10 @@ llm:
     openai:
       chat_model: gpt-4o-mini
       temperature: 0.3
+
+# Optional: include local Markdown/txt literature in Reflection.full_review.
+# search:
+#   private_corpus_enabled: true
+#   private_corpus_paths:
+#     - /absolute/path/to/mineru-or-zotero-markdown
+#   private_corpus_max_results: 3

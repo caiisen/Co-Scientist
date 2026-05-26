@@ -138,6 +138,7 @@ class EvolutionAgent(Agent):
                 session_id=ctx.session_id,
                 persist_citations=False,
                 http_session=ctx.http_session,
+                embedding_client=ctx.llm_for(self.name),
             )
 
         variables = _base_variables(plan) | {

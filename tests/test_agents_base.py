@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -15,8 +16,9 @@ from co_scientist.config import (
     RuntimeConfig,
     SearchConfig,
 )
-from co_scientist.llm.client import LLMRouter
+from co_scientist.llm.client import LLMCallMetadata, LLMChatResult, LLMRouter
 from co_scientist.memory import SQLiteStore, Task
+from co_scientist.supervisor.metrics import MetricsSink
 from co_scientist.utils.prompts import PromptTemplateStore
 
 
@@ -115,3 +117,61 @@ async def test_agent_build_messages_and_llm_routing(tmp_path: Path) -> None:
             {"role": "system", "content": agent.system_prompt},
             {"role": "user", "content": "compare ideas"},
         ]
+
+
+class ConcurrentMetadataClient:
+    last_call = None
+
+    async def chat_with_metadata(self, messages, **kwargs):
+        content = messages[-1]["content"]
+        if content == "slow":
+            await asyncio.sleep(0.02)
+            metadata = LLMCallMetadata(model="slow-model", latency_seconds=0.02, total_tokens=11)
+        else:
+            metadata = LLMCallMetadata(model="fast-model", latency_seconds=0.001, total_tokens=3)
+        self.last_call = metadata
+        return LLMChatResult(text=content, metadata=metadata)
+
+
+class ConcurrentRouter:
+    def __init__(self) -> None:
+        self.client = ConcurrentMetadataClient()
+
+    def client_for(self, agent=None):
+        return self.client
+
+
+@pytest.mark.asyncio
+async def test_agent_chat_metrics_use_call_local_metadata(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "agent_metrics.sqlite") as store:
+        session = await store.create_session("agent metrics")
+        agent = EchoAgent()
+        ctx = AgentContext(
+            store=store,
+            llm_router=ConcurrentRouter(),
+            config=make_config(),
+            session_id=session.id,
+            metrics_sink=MetricsSink(runs_dir=tmp_path / "runs"),
+        )
+
+        await asyncio.gather(
+            agent.chat(ctx, [{"role": "user", "content": "slow"}]),
+            agent.chat(ctx, [{"role": "user", "content": "fast"}]),
+        )
+
+    events = [
+        line
+        for line in (tmp_path / "runs" / session.id / "metrics.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
+
+    assert any(
+        '"model": "slow-model"' in event and '"total_tokens": 11' in event
+        for event in events
+    )
+    assert any(
+        '"model": "fast-model"' in event and '"total_tokens": 3' in event
+        for event in events
+    )

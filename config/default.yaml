@@ -22,6 +22,15 @@ search:
   pubmed_max_results: 5
   semantic_scholar_max_results: 5
   arxiv_max_results: 5
+  private_corpus_enabled: false
+  private_corpus_paths: []
+  private_corpus_max_results: 3
+  private_corpus_chunk_chars: 1600
+  private_corpus_chunk_overlap: 200
+
+observability:
+  metrics_enabled: true
+  runs_dir: runs
 
 llm:
   default_provider: openai
