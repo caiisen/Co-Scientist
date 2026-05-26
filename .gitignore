@@ -17,3 +17,4 @@ doc/LLM-for-Zotero-MinerU-*/
 doc/*.pdf
 doc/0*.md
 temp/
+.claude/
