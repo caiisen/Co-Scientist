@@ -1,4 +1,5 @@
 runtime:
+  initial_ideas: 5
   max_ideas: 20
   max_matches_per_idea: 5
   worker_concurrency: 4

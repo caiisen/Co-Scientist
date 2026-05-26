@@ -28,9 +28,13 @@ def test_help() -> None:
 
 
 def test_config_show_cli_override() -> None:
-    result = CliRunner().invoke(app, ["config-show", "--max-ideas", "9"])
+    result = CliRunner().invoke(
+        app,
+        ["config-show", "--initial-ideas", "4", "--max-ideas", "9"],
+    )
 
     assert result.exit_code == 0
+    assert "initial_ideas: 4" in result.output
     assert "max_ideas: 9" in result.output
 
 
@@ -44,6 +48,7 @@ def test_new_and_resume_expose_verbose_option() -> None:
     assert resume_help.exit_code == 0
     assert "--verbose" in new_help.output
     assert "--verbose" in resume_help.output
+    assert "--initial-ideas" in new_help.output
     assert "--max-ideas" in new_help.output
     assert "--max-matches-per-idea" in resume_help.output
 

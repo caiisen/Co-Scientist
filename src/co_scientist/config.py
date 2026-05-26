@@ -14,6 +14,7 @@ LOCAL_CONFIG_PATH = PROJECT_ROOT / "config" / "local.yaml"
 
 
 class RuntimeConfig(BaseModel):
+    initial_ideas: int = Field(default=5, gt=0)
     max_ideas: int = Field(gt=0)
     max_matches_per_idea: int = Field(gt=0)
     worker_concurrency: int = Field(gt=0)

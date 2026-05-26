@@ -56,7 +56,8 @@ class GenerationAgent(Agent):
         results = []
         citations = []
         errors = []
-        specs = _initial_specs()
+        initial_count = min(ctx.config.runtime.initial_ideas, ctx.config.runtime.max_ideas)
+        specs = _initial_specs()[:initial_count]
         strategy_results = await asyncio.gather(
             *(self._run_strategy(ctx, plan, spec) for spec in specs)
         )

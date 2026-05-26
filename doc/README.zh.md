@@ -137,7 +137,7 @@ search:
 一次 session 的主要流程：
 
 1. `Planner` 将自然语言 goal 解析为 `ResearchPlan`。
-2. `Generation` 使用多种策略生成初始 hypotheses。
+2. `Generation` 使用多种策略生成最多 `initial_ideas` 条初始 hypotheses。
 3. 每条 hypothesis 进入 `Reflection.full_review`，检索公开和私有文献并评分。
 4. `Proximity` 计算 hypothesis 相似度图。
 5. `Ranking` 选择 hypothesis 对，调用 LLM 比较并更新 Elo。
@@ -168,7 +168,7 @@ EOF
 启动新 session：
 
 ```bash
-co-scientist new goal.txt --max-ideas 8 --max-matches-per-idea 2 --verbose
+co-scientist new goal.txt --initial-ideas 5 --max-ideas 8 --max-matches-per-idea 2 --verbose
 ```
 
 查看状态：

@@ -51,6 +51,12 @@ class ProximityAgent(Agent):
             texts = [_embedding_text(hypothesis) for hypothesis in missing]
             try:
                 vectors = await ctx.llm_for(self.name).embed(texts)
+            except ValueError as exc:
+                if str(exc) != "no embedding model configured for this provider":
+                    raise
+                embedding_source = "lexical_fallback"
+                embedding_error = str(exc)
+                vectors = [lexical_embedding(text) for text in texts]
             except EMBED_FALLBACK_ERRORS as exc:
                 embedding_source = "lexical_fallback"
                 embedding_error = str(exc)

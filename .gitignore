@@ -18,3 +18,5 @@ doc/*.pdf
 doc/0*.md
 temp/
 .claude/
+goal.txt
+example.py

@@ -34,11 +34,13 @@ class ExportFormat(StrEnum):
 
 def _load_config_or_exit(
     session_config: Path | None,
+    initial_ideas: int | None,
     max_ideas: int | None,
     max_matches_per_idea: int | None,
     worker_concurrency: int | None,
 ):
     overrides = {
+        "runtime.initial_ideas": initial_ideas,
         "runtime.max_ideas": max_ideas,
         "runtime.max_matches_per_idea": max_matches_per_idea,
         "runtime.worker_concurrency": worker_concurrency,
@@ -61,6 +63,10 @@ def config_show(
         Path | None,
         typer.Option("--session-config", help="YAML config for this research session."),
     ] = None,
+    initial_ideas: Annotated[
+        int | None,
+        typer.Option("--initial-ideas", help="Override runtime.initial_ideas."),
+    ] = None,
     max_ideas: Annotated[
         int | None,
         typer.Option("--max-ideas", help="Override runtime.max_ideas."),
@@ -77,6 +83,7 @@ def config_show(
     """Print the resolved Phase 0 configuration."""
     config = _load_config_or_exit(
         session_config,
+        initial_ideas,
         max_ideas,
         max_matches_per_idea,
         worker_concurrency,
@@ -99,6 +106,10 @@ def new(
         bool,
         typer.Option("--verbose", "-v", help="Print detailed phase, task, input, and output logs."),
     ] = False,
+    initial_ideas: Annotated[
+        int | None,
+        typer.Option("--initial-ideas", help="Override runtime.initial_ideas."),
+    ] = None,
     max_ideas: Annotated[
         int | None,
         typer.Option("--max-ideas", help="Override runtime.max_ideas."),
@@ -115,6 +126,7 @@ def new(
     """Start a Phase 7 research session in the foreground."""
     config = _load_config_or_exit(
         session_config,
+        initial_ideas,
         max_ideas,
         max_matches_per_idea,
         worker_concurrency,
@@ -148,6 +160,10 @@ def resume(
         bool,
         typer.Option("--verbose", "-v", help="Print detailed phase, task, input, and output logs."),
     ] = False,
+    initial_ideas: Annotated[
+        int | None,
+        typer.Option("--initial-ideas", help="Override runtime.initial_ideas."),
+    ] = None,
     max_ideas: Annotated[
         int | None,
         typer.Option("--max-ideas", help="Override runtime.max_ideas."),
@@ -164,6 +180,7 @@ def resume(
     """Resume pending Phase 7 work for a research session."""
     config = _load_config_or_exit(
         session_config,
+        initial_ideas,
         max_ideas,
         max_matches_per_idea,
         worker_concurrency,
@@ -247,7 +264,7 @@ def export(
     ] = ExportFormat.MD,
 ) -> None:
     """Export Phase 7 output as markdown."""
-    config = _load_config_or_exit(session_config, None, None, None)
+    config = _load_config_or_exit(session_config, None, None, None, None)
     try:
         if export_format == ExportFormat.MD:
             markdown = _run_async(
@@ -330,6 +347,10 @@ def revise_goal(
         bool,
         typer.Option("--force", help="Skip confirmation for destructive tournament reset."),
     ] = False,
+    initial_ideas: Annotated[
+        int | None,
+        typer.Option("--initial-ideas", help="Override runtime.initial_ideas."),
+    ] = None,
     max_ideas: Annotated[
         int | None,
         typer.Option("--max-ideas", help="Override runtime.max_ideas."),
@@ -356,6 +377,7 @@ def revise_goal(
         raise typer.Exit(code=1)
     config = _load_config_or_exit(
         session_config,
+        initial_ideas,
         max_ideas,
         max_matches_per_idea,
         worker_concurrency,

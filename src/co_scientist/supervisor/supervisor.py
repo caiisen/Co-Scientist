@@ -68,13 +68,15 @@ class Supervisor:
         )
         self._log(
             "[phase:start] session="
-            f"{session.id} max_ideas={self.config.runtime.max_ideas} "
+            f"{session.id} initial_ideas={self.config.runtime.initial_ideas} "
+            f"max_ideas={self.config.runtime.max_ideas} "
             f"max_matches_per_idea={self.config.runtime.max_matches_per_idea} "
             f"workers={self.config.runtime.worker_concurrency}"
         )
         self.metrics_sink.emit(
             session.id,
             "session.start",
+            initial_ideas=self.config.runtime.initial_ideas,
             max_ideas=self.config.runtime.max_ideas,
             max_matches_per_idea=self.config.runtime.max_matches_per_idea,
             worker_concurrency=self.config.runtime.worker_concurrency,
@@ -478,6 +480,9 @@ class Supervisor:
         result: AgentResult,
     ) -> list[int]:
         payloads = result.payload.get("hypotheses", [result.payload])
+        current_count = await self.store.count_hypotheses(task.session_id)
+        remaining_slots = max(self.config.runtime.max_ideas - current_count, 0)
+        payloads = payloads[:remaining_slots]
         hypotheses = [
             hypothesis_from_payload(task.session_id, payload)
             for payload in payloads

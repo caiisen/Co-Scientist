@@ -41,10 +41,11 @@ class StaticRouter(LLMRouter):
         return self.client
 
 
-def make_config() -> AppConfig:
+def make_config(*, initial_ideas: int = 5, max_ideas: int = 5) -> AppConfig:
     return AppConfig(
         runtime=RuntimeConfig(
-            max_ideas=5,
+            initial_ideas=initial_ideas,
+            max_ideas=max_ideas,
             max_matches_per_idea=1,
             worker_concurrency=1,
             request_timeout_seconds=30,
@@ -122,6 +123,68 @@ async def test_generation_agent_creates_five_hypotheses(tmp_path: Path) -> None:
     assert all("citations" in item for item in result.payload["hypotheses"])
     assert len(result.citations) == 4
     assert len(client.messages) == 7
+
+
+@pytest.mark.asyncio
+async def test_generation_agent_respects_initial_ideas(tmp_path: Path) -> None:
+    client = SequenceClient(
+        [
+            "Reasoning\nHYPOTHESIS\nLiterature hypothesis",
+            "Turn 1 discussion",
+            "Turn 2 discussion",
+            "Turn 3\nHYPOTHESIS\nDebate hypothesis",
+        ]
+    )
+    config = make_config(initial_ideas=2, max_ideas=5)
+    async with SQLiteStore(tmp_path / "generation_initial_ideas.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(
+            ResearchPlan(session_id=session.id, goal=session.goal, preferences=["novel"])
+        )
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(client),
+            config=config,
+            session_id=session.id,
+        )
+
+        result = await GenerationAgent(literature_search=fake_literature_search).execute(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses"),
+            ctx,
+        )
+
+    assert result.ok
+    assert [item["source_strategy"] for item in result.payload["hypotheses"]] == [
+        "literature_review",
+        "scientific_debate",
+    ]
+    assert len(client.messages) == 4
+
+
+@pytest.mark.asyncio
+async def test_generation_agent_caps_initial_ideas_at_max_ideas(tmp_path: Path) -> None:
+    client = SequenceClient(["Reasoning\nHYPOTHESIS\nLiterature hypothesis"])
+    config = make_config(initial_ideas=5, max_ideas=1)
+    async with SQLiteStore(tmp_path / "generation_initial_cap.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(
+            ResearchPlan(session_id=session.id, goal=session.goal, preferences=["novel"])
+        )
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(client),
+            config=config,
+            session_id=session.id,
+        )
+
+        result = await GenerationAgent(literature_search=fake_literature_search).execute(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses"),
+            ctx,
+        )
+
+    assert result.ok
+    assert len(result.payload["hypotheses"]) == 1
+    assert len(client.messages) == 1
 
 
 @pytest.mark.asyncio

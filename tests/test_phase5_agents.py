@@ -38,6 +38,11 @@ class FailingEmbedClient(Phase5Client):
         )
 
 
+class MissingEmbeddingModelClient(Phase5Client):
+    async def embed(self, texts, **kwargs):
+        raise ValueError("no embedding model configured for this provider")
+
+
 class BuggyEmbedClient(Phase5Client):
     async def embed(self, texts, **kwargs):
         raise TypeError("programming bug")
@@ -158,6 +163,41 @@ async def test_proximity_agent_falls_back_when_embedding_provider_fails(tmp_path
     assert result.ok
     assert result.payload["embedding_source"] == "lexical_fallback"
     assert "embedding endpoint unavailable" in result.payload["embedding_error"]
+    assert list(edges) == [(first.id, second.id)]
+
+
+@pytest.mark.asyncio
+async def test_proximity_agent_falls_back_without_embedding_model(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "proximity_no_embedding_model.sqlite") as store:
+        session = await store.create_session("goal")
+        first = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="A content", summary="A kinase")
+        )
+        second = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="B content", summary="B kinase")
+        )
+        assert first.id is not None
+        assert second.id is not None
+        ctx = AgentContext(
+            store=store,
+            llm_router=StaticRouter(MissingEmbeddingModelClient()),
+            config=make_config(),
+            session_id=session.id,
+        )
+
+        result = await ProximityAgent().execute(
+            Task(
+                session_id=session.id,
+                agent="proximity",
+                action="update_proximity_graph",
+            ),
+            ctx,
+        )
+        edges = await store.proximity_edges_for_session(session.id)
+
+    assert result.ok
+    assert result.payload["embedding_source"] == "lexical_fallback"
+    assert result.payload["embedding_error"] == "no embedding model configured for this provider"
     assert list(edges) == [(first.id, second.id)]
 
 

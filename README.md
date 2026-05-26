@@ -142,7 +142,7 @@ better grounding when literature-search credentials are configured.
 A session follows this high-level flow:
 
 1. `Planner` parses the natural-language goal into a `ResearchPlan`.
-2. `Generation` creates initial hypotheses with multiple strategies.
+2. `Generation` creates up to `initial_ideas` initial hypotheses with multiple strategies.
 3. Each hypothesis enters `Reflection.full_review`, which searches public and
    private literature and assigns a review score.
 4. `Proximity` computes hypothesis similarity.
@@ -178,7 +178,7 @@ EOF
 Start a new session:
 
 ```bash
-co-scientist new goal.txt --max-ideas 8 --max-matches-per-idea 2 --verbose
+co-scientist new goal.txt --initial-ideas 5 --max-ideas 8 --max-matches-per-idea 2 --verbose
 ```
 
 Show status:

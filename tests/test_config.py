@@ -26,6 +26,7 @@ def test_load_config_applies_default_local_session_and_cli_order(tmp_path: Path)
         tmp_path / "default.yaml",
         """
 runtime:
+  initial_ideas: 5
   max_ideas: 20
   max_matches_per_idea: 5
   worker_concurrency: 4
@@ -48,6 +49,7 @@ llm:
         tmp_path / "local.yaml",
         """
 runtime:
+  initial_ideas: 4
   max_ideas: 10
 llm:
   providers:
@@ -71,9 +73,10 @@ llm:
         default_path=default_path,
         local_path=local_path,
         session_path=session_path,
-        cli_overrides={"runtime.max_ideas": 7},
+        cli_overrides={"runtime.initial_ideas": 3, "runtime.max_ideas": 7},
     )
 
+    assert config.runtime.initial_ideas == 3
     assert config.runtime.max_ideas == 7
     assert config.runtime.max_matches_per_idea == 3
     assert config.runtime.worker_concurrency == 4
@@ -92,6 +95,7 @@ def test_provider_resolves_environment_values(
         tmp_path / "default.yaml",
         """
 runtime:
+  initial_ideas: 5
   max_ideas: 20
   max_matches_per_idea: 5
   worker_concurrency: 4
@@ -122,6 +126,7 @@ def test_unknown_agent_provider_raises(tmp_path: Path) -> None:
         tmp_path / "default.yaml",
         """
 runtime:
+  initial_ideas: 5
   max_ideas: 20
   max_matches_per_idea: 5
   worker_concurrency: 4

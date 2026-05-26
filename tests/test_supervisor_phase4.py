@@ -63,10 +63,10 @@ class BucketedGenerationAgent(Agent):
         )
 
 
-def make_config() -> AppConfig:
+def make_config(*, max_ideas: int = 5) -> AppConfig:
     return AppConfig(
         runtime=RuntimeConfig(
-            max_ideas=5,
+            max_ideas=max_ideas,
             max_matches_per_idea=1,
             worker_concurrency=2,
             request_timeout_seconds=30,
@@ -183,3 +183,28 @@ async def test_supervisor_links_hypothesis_citations_by_payload_bucket(tmp_path:
 
     assert [link["pmid"] for link in first_links] == ["1"]
     assert [link["pmid"] for link in second_links] == ["2"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_does_not_store_more_than_max_ideas(tmp_path: Path) -> None:
+    config = make_config(max_ideas=1)
+    async with SQLiteStore(tmp_path / "supervisor_max_ideas.sqlite") as store:
+        session = await store.create_session("goal")
+        await store.save_research_plan(ResearchPlan(session_id=session.id, goal=session.goal))
+        supervisor = Supervisor(
+            store=store,
+            config=config,
+            llm_router=StaticRouter(SequenceClient([])),
+            agents={"generation": BucketedGenerationAgent()},
+        )
+        queue = TaskQueue(store, session.id)
+        task = await queue.enqueue(
+            Task(session_id=session.id, agent="generation", action="create_initial_hypotheses")
+        )
+        ctx = supervisor._context(session.id, http_session=None)
+
+        result = await BucketedGenerationAgent().execute(task, ctx)
+        await supervisor._handle_result(queue, task, result, ctx)
+        hypotheses = await store.list_session_hypotheses(session.id)
+
+    assert [hypothesis.summary for hypothesis in hypotheses] == ["H1"]
