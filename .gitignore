@@ -13,5 +13,7 @@ config/local.yaml
 runs/
 *.sqlite
 *.sqlite3
-doc
+doc/LLM-for-Zotero-MinerU-*/
+doc/*.pdf
+doc/0*.md
 temp/
