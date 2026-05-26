@@ -9,9 +9,11 @@ from pydantic import ValidationError
 from co_scientist.memory import (
     Hypothesis,
     Match,
+    ResearchOverview,
     ResearchPlan,
     Review,
     SQLiteStore,
+    SystemFeedback,
     Task,
     TaskPriority,
     TaskStatus,
@@ -144,6 +146,96 @@ async def test_pending_tasks_order_and_status_counts(tmp_path: Path) -> None:
         counts = await store.tasks_by_status(session.id)
         assert counts[TaskStatus.PENDING] == 1
         assert counts[TaskStatus.RUNNING] == 1
+
+
+@pytest.mark.asyncio
+async def test_goal_revision_reset_clears_derived_tournament_state(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "goal_revision.sqlite") as store:
+        session = await store.create_session("old goal")
+        await store.save_research_plan(ResearchPlan(session_id=session.id, goal=session.goal))
+        first = await store.add_hypothesis(
+            Hypothesis(
+                session_id=session.id,
+                content="A",
+                summary="A",
+                elo=1400,
+                meta_review_round=2,
+            )
+        )
+        second = await store.add_hypothesis(
+            Hypothesis(session_id=session.id, content="B", summary="B", elo=1100)
+        )
+        assert first.id is not None and second.id is not None
+        await store.add_review(
+            Review(session_id=session.id, hypothesis_id=first.id, type="full", content="Review")
+        )
+        await store.add_match_and_update_elo(
+            Match(
+                session_id=session.id,
+                hypo_a_id=first.id,
+                hypo_b_id=second.id,
+                winner_id=first.id,
+                transcript="A wins.",
+            )
+        )
+        await store.add_elo_checkpoint(session.id)
+        await store.upsert_proximity_edge(
+            session_id=session.id,
+            hypo_a_id=first.id,
+            hypo_b_id=second.id,
+            similarity=0.8,
+        )
+        await store.add_feedback(SystemFeedback(session_id=session.id, round=1, content="Old"))
+        await store.add_overview(
+            ResearchOverview(session_id=session.id, round=1, content="Old overview")
+        )
+        task = await store.add_task(
+            Task(session_id=session.id, agent="ranking", action="run_tournament_match")
+        )
+        assert task.id is not None
+        await store.update_session_goal(session.id, "new goal")
+
+        cancelled = await store.reset_tournament_for_goal_revision(session.id)
+        session_after = await store.get_session(session.id)
+        hypotheses = await store.list_session_hypotheses(session.id)
+        tasks = await store.tasks_by_status(session.id)
+        match_count = await store.count_matches(session.id)
+        checkpoints = await store.latest_elo_checkpoints(session.id)
+        edges = await store.proximity_edges_for_session(session.id)
+        feedback_count = await store.count_feedback(session.id)
+        overview = await store.latest_overview(session.id)
+        review_count = await store.count_reviews(session.id)
+
+    assert session_after is not None
+    assert session_after.goal == "new goal"
+    assert [hypothesis.elo for hypothesis in hypotheses] == [1200, 1200]
+    assert [hypothesis.meta_review_round for hypothesis in hypotheses] == [None, None]
+    assert match_count == 0
+    assert checkpoints == []
+    assert edges == {}
+    assert feedback_count == 0
+    assert overview is None
+    assert review_count == 1
+    assert cancelled == 1
+    assert tasks[TaskStatus.CANCELLED] == 1
+
+
+@pytest.mark.asyncio
+async def test_goal_revision_reset_rejects_running_tasks(tmp_path: Path) -> None:
+    async with SQLiteStore(tmp_path / "goal_revision_running.sqlite") as store:
+        session = await store.create_session("goal")
+        task = await store.add_task(
+            Task(session_id=session.id, agent="ranking", action="run_tournament_match")
+        )
+        assert task.id is not None
+        await store.mark_task_status(task.id, TaskStatus.RUNNING)
+
+        with pytest.raises(ValueError, match="tasks are running"):
+            await store.reset_tournament_for_goal_revision(session.id)
+
+        tasks = await store.tasks_by_status(session.id)
+
+    assert tasks[TaskStatus.RUNNING] == 1
 
 
 @pytest.mark.asyncio

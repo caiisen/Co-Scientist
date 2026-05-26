@@ -221,6 +221,15 @@ class SQLiteStore:
             created_at=_dt(row["created_at"]),
         )
 
+    async def update_session_goal(self, session_id: str, goal: str) -> None:
+        cursor = await self.db.execute(
+            "UPDATE sessions SET goal = ? WHERE id = ?",
+            (goal, session_id),
+        )
+        if cursor.rowcount == 0:
+            raise ValueError(f"unknown session: {session_id}")
+        await self.db.commit()
+
     async def save_research_plan(self, plan: ResearchPlan) -> ResearchPlan:
         await self.db.execute(
             """
@@ -486,6 +495,66 @@ class SQLiteStore:
         )
         await self.db.commit()
         return cursor.rowcount
+
+    async def reset_tournament_for_goal_revision(self, session_id: str) -> int:
+        """Reset goal-dependent derived state before re-reviewing hypotheses."""
+        if await self.get_session(session_id) is None:
+            raise ValueError(f"unknown session: {session_id}")
+        if await self.has_running_tasks(session_id):
+            raise ValueError(
+                "cannot revise goal while tasks are running; stop the supervisor first"
+            )
+        now = _dt_text(utc_now())
+        try:
+            await self.db.execute(
+                """
+                UPDATE hypotheses
+                SET elo = 1200, meta_review_round = NULL
+                WHERE session_id = ?
+                """,
+                (session_id,),
+            )
+            await self.db.execute("DELETE FROM matches WHERE session_id = ?", (session_id,))
+            await self.db.execute(
+                "DELETE FROM elo_checkpoints WHERE session_id = ?",
+                (session_id,),
+            )
+            await self.db.execute(
+                "DELETE FROM proximity_edges WHERE session_id = ?",
+                (session_id,),
+            )
+            await self.db.execute("DELETE FROM feedback WHERE session_id = ?", (session_id,))
+            await self.db.execute("DELETE FROM overview WHERE session_id = ?", (session_id,))
+            cursor = await self.db.execute(
+                """
+                UPDATE tasks
+                SET status = ?, updated_at = ?
+                WHERE session_id = ? AND status = ?
+                """,
+                (
+                    TaskStatus.CANCELLED.value,
+                    now,
+                    session_id,
+                    TaskStatus.PENDING.value,
+                ),
+            )
+        except Exception:
+            await self.db.rollback()
+            raise
+        await self.db.commit()
+        return cursor.rowcount
+
+    async def has_running_tasks(self, session_id: str) -> bool:
+        async with self.db.execute(
+            """
+            SELECT 1 FROM tasks
+            WHERE session_id = ? AND status = ?
+            LIMIT 1
+            """,
+            (session_id, TaskStatus.RUNNING.value),
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row is not None
 
     async def tasks_by_status(self, session_id: str) -> dict[TaskStatus, int]:
         async with self.db.execute(

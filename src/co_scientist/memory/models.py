@@ -29,6 +29,15 @@ class TaskPriority(IntEnum):
     USER = 100
 
 
+class ReviewType(StrEnum):
+    INITIAL = "initial"
+    FULL = "full"
+    DEEP_VERIFICATION = "deep_verification"
+    OBSERVATION = "observation"
+    SIMULATION = "simulation"
+    MANUAL = "manual"
+
+
 class Session(BaseModel):
     id: str
     goal: str
@@ -58,7 +67,7 @@ class Review(BaseModel):
     id: int | None = None
     session_id: str
     hypothesis_id: int
-    type: str
+    type: ReviewType
     score: float | None = Field(default=None, ge=0, le=10)
     content: str
     created_at: datetime = Field(default_factory=utc_now)
