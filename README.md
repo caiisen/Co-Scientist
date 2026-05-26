@@ -57,9 +57,6 @@ config/
   prompts/                  # Agent prompt templates
 doc/
   README.zh.md              # Chinese README
-  01-实现方案.md             # Architecture and implementation notes
-  02-任务清单与开发路线图.md  # Phase status and roadmap
-  03-待讨论的实现细节问题.md  # Decisions and open design questions
 src/co_scientist/
   agents/                   # Generation, Reflection, Ranking, etc.
   llm/                      # OpenAI-compatible client/router
