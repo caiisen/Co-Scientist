@@ -1,20 +1,17 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from co_scientist.memory.models import Hypothesis, ResearchPlan, Task
-from co_scientist.tools.literature import search_literature, search_literature_with_fallbacks
-from co_scientist.tools.models import ToolResult
+from co_scientist.tools.literature import search_literature
 from co_scientist.tools.query import build_literature_query
 
 from .base import Agent, AgentContext
+from .evidence import LiteratureSearch, search_evidence
 from .parsers import parse_hypothesis_block, summarize_hypothesis
 from .results import AgentResult, AgentResultKind
-
-LiteratureSearch = Callable[..., Awaitable[ToolResult]]
 
 
 @dataclass(frozen=True)
@@ -98,9 +95,11 @@ class GenerationAgent(Agent):
         if spec.strategy == "scientific_debate":
             return await self._scientific_debate(ctx, plan)
 
-        evidence = await _search_evidence(
+        evidence = await search_evidence(
             self.literature_search,
             _evidence_queries(plan, spec.query_variant),
+            source_text=plan.goal,
+            query_client=ctx.llm_for(self.name),
             domain=infer_search_domain(plan),
             config=ctx.config.search,
             store=ctx.store,
@@ -273,9 +272,3 @@ def hypothesis_from_payload(session_id: str, payload: dict[str, Any]) -> Hypothe
         parent_ids=[int(parent_id) for parent_id in payload.get("parent_ids", [])],
         meta_review_round=int(raw_round) if raw_round is not None else None,
     )
-
-
-async def _search_evidence(searcher: LiteratureSearch, queries: list[str], **kwargs) -> ToolResult:
-    if searcher is search_literature:
-        return await search_literature_with_fallbacks(queries, **kwargs)
-    return await searcher(queries[0], **kwargs)

@@ -33,6 +33,7 @@ def test_tool_result_formats_evidence_pack_and_serializes() -> None:
     assert restored.status == ToolStatus.OK
     assert "PMID: 123" in restored.format_evidence_pack(max_chars_per_item=40)
     assert "..." in restored.format_evidence_pack(max_chars_per_item=40)
+    assert "..." not in restored.format_evidence_pack()
 
 
 def test_tool_result_status_from_errors() -> None:

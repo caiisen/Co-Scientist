@@ -1,21 +1,19 @@
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any
 
 from co_scientist.memory.models import Hypothesis, ResearchPlan, Task
-from co_scientist.tools.literature import search_literature, search_literature_with_fallbacks
+from co_scientist.tools.literature import search_literature
 from co_scientist.tools.models import ToolResult
 from co_scientist.tools.query import build_literature_query
 
 from .base import Agent, AgentContext
+from .evidence import LiteratureSearch, search_evidence
 from .generation import infer_search_domain
 from .parsers import parse_hypothesis_block, summarize_hypothesis
 from .results import AgentResult, AgentResultKind
-
-LiteratureSearch = Callable[..., Awaitable[ToolResult]]
 
 
 @dataclass(frozen=True)
@@ -125,13 +123,15 @@ class EvolutionAgent(Agent):
         parents = _parents_for_strategy(spec.strategy, top_hypotheses)
         evidence = ToolResult(source="literature")
         if spec.strategy == "grounding_enhancement":
-            evidence = await _search_evidence(
+            evidence = await search_evidence(
                 self.literature_search,
                 [
                     build_literature_query(plan.goal, parents[0].summary),
                     build_literature_query(plan.goal),
                     plan.goal,
                 ],
+                source_text=f"{plan.goal}\n\nHypothesis summary:\n{parents[0].summary}",
+                query_client=ctx.llm_for(self.name),
                 domain=infer_search_domain(plan),
                 config=ctx.config.search,
                 store=ctx.store,
@@ -231,9 +231,3 @@ def _hypothesis_result(
         citations=citations,
         raw_text=text,
     )
-
-
-async def _search_evidence(searcher: LiteratureSearch, queries: list[str], **kwargs) -> ToolResult:
-    if searcher is search_literature:
-        return await search_literature_with_fallbacks(queries, **kwargs)
-    return await searcher(queries[0], **kwargs)

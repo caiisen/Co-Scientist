@@ -20,3 +20,5 @@ temp/
 .claude/
 goal.txt
 example.py
+*.log
+goal_key_word.txt

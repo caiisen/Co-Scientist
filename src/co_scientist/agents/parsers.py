@@ -116,12 +116,13 @@ def _score_result(value: str) -> ParseResult:
     return ParseResult(score)
 
 
-def summarize_hypothesis(text: str, *, max_chars: int = 180) -> str:
+def summarize_hypothesis(text: str, *, max_chars: int | None = None) -> str:
     for line in text.splitlines():
         cleaned = _clean_summary_line(line)
         if cleaned:
-            return _truncate(cleaned, max_chars)
-    return _truncate(" ".join(text.split()), max_chars)
+            return _truncate(cleaned, max_chars) if max_chars is not None else cleaned
+    fallback = " ".join(text.split())
+    return _truncate(fallback, max_chars) if max_chars is not None else fallback
 
 
 def parse_observation_verdict(text: str) -> ParseResult:

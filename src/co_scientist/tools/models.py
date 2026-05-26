@@ -49,7 +49,7 @@ class SearchDocument(BaseModel):
     score: float | None = None
     citation: Citation
 
-    def evidence_text(self, *, max_chars: int = 1200) -> str:
+    def evidence_text(self, *, max_chars: int | None = None) -> str:
         identifiers = []
         if self.citation.doi:
             identifiers.append(f"DOI: {self.citation.doi}")
@@ -69,10 +69,9 @@ class SearchDocument(BaseModel):
             header_parts.append(self.venue)
         header_parts.append(self.source)
 
-        body = truncate_text(
-            self.abstract_or_snippet or "No abstract or snippet available.",
-            max_chars,
-        )
+        body = normalize_text(self.abstract_or_snippet or "No abstract or snippet available.")
+        if max_chars is not None:
+            body = truncate_text(body, max_chars)
         suffix = f"\nIdentifiers: {'; '.join(identifiers)}" if identifiers else ""
         return f"{' | '.join(header_parts)}\n{body}{suffix}"
 
@@ -109,7 +108,7 @@ class ToolResult(BaseModel):
         self,
         *,
         max_items: int = 5,
-        max_chars_per_item: int = 1200,
+        max_chars_per_item: int | None = None,
     ) -> str:
         if not self.documents:
             error_text = "; ".join(self.errors) if self.errors else "no results"
@@ -129,10 +128,14 @@ PMID_RE = re.compile(r"\bPMID[:\s]+(\d+)\b", re.IGNORECASE)
 
 
 def truncate_text(text: str, max_chars: int) -> str:
-    normalized = " ".join(text.split())
+    normalized = normalize_text(text)
     if len(normalized) <= max_chars:
         return normalized
     return normalized[: max_chars - 3].rstrip() + "..."
+
+
+def normalize_text(text: str) -> str:
+    return " ".join(text.split())
 
 
 def normalize_identifier(value: str) -> str:

@@ -10,6 +10,7 @@ from co_scientist.memory import SQLiteStore
 from co_scientist.tools.literature import (
     dedupe_documents,
     search_literature,
+    search_literature_by_source_queries,
     search_literature_with_fallbacks,
 )
 from co_scientist.tools.models import Citation, SearchDocument, ToolResult, ToolStatus
@@ -192,6 +193,55 @@ async def test_search_literature_with_fallbacks_uses_later_query(tmp_path: Path)
 
     assert calls == ["too narrow", "broader query"]
     assert result.documents[0].title == "Fallback"
+
+
+@pytest.mark.asyncio
+async def test_search_literature_by_source_queries_uses_source_specific_fallbacks() -> None:
+    calls: dict[str, list[str]] = {"pubmed": [], "semantic_scholar": [], "tavily": []}
+
+    async def pubmed_search(query: str, *, max_results: int):
+        calls["pubmed"].append(query)
+        documents = [] if query == "pubmed narrow" else [document("pubmed", "PubMed", pmid="1")]
+        return ToolResult.from_documents(source="pubmed", documents=documents)
+
+    async def semantic_search(query: str, *, max_results: int):
+        calls["semantic_scholar"].append(query)
+        return ToolResult.from_documents(
+            source="semantic_scholar",
+            documents=[document("semantic_scholar", "Semantic", doi="10.1000/s")],
+        )
+
+    async def tavily_search(query: str, *, max_results: int):
+        calls["tavily"].append(query)
+        return ToolResult.from_documents(
+            source="tavily",
+            documents=[document("tavily", "Web", doi="10.1000/w")],
+        )
+
+    result = await search_literature_by_source_queries(
+        {
+            "pubmed": ["pubmed narrow", "pubmed broader"],
+            "semantic_scholar": ["keyword query"],
+            "tavily": ["keyword query"],
+        },
+        config=SearchConfig(max_results=5),
+        source_searchers={
+            "pubmed": pubmed_search,
+            "semantic_scholar": semantic_search,
+            "tavily": tavily_search,
+        },
+    )
+
+    assert calls == {
+        "pubmed": ["pubmed narrow", "pubmed broader"],
+        "semantic_scholar": ["keyword query"],
+        "tavily": ["keyword query"],
+    }
+    assert {document.source for document in result.documents} == {
+        "pubmed",
+        "semantic_scholar",
+        "tavily",
+    }
 
 
 @pytest.mark.asyncio

@@ -142,6 +142,63 @@ async def search_literature_with_fallbacks(
     )
 
 
+async def search_literature_by_source_queries(
+    source_queries: dict[str, list[str]],
+    *,
+    domain: str = "biomed",
+    max_results: int | None = None,
+    config: SearchConfig | None = None,
+    store: SQLiteStore | None = None,
+    session_id: str | None = None,
+    persist_citations: bool = True,
+    http_session: aiohttp.ClientSession | None = None,
+    source_searchers: dict[str, SearchCallable] | None = None,
+    embedding_client: object | None = None,
+) -> ToolResult:
+    cfg = config or SearchConfig(max_results=5)
+    enabled_sources = _sources_for_domain(domain, cfg)
+    if not enabled_sources:
+        return ToolResult(source="literature")
+
+    results = await asyncio.gather(
+        *[
+            search_literature_with_fallbacks(
+                source_queries.get(source, []),
+                domain=domain,
+                max_results=max_results,
+                config=_config_for_single_source(cfg, source, max_results=max_results),
+                store=store,
+                session_id=session_id,
+                persist_citations=persist_citations,
+                http_session=http_session,
+                source_searchers=source_searchers,
+                embedding_client=embedding_client,
+            )
+            for source in enabled_sources
+        ]
+    )
+
+    documents: list[SearchDocument] = []
+    errors: list[str] = []
+    for result in results:
+        documents.extend(result.documents)
+        errors.extend(result.errors)
+    deduped = dedupe_documents(documents)
+
+    status = ToolStatus.OK
+    if errors and deduped:
+        status = ToolStatus.DEGRADED
+    elif errors and not deduped:
+        status = ToolStatus.FAILED
+    return ToolResult(
+        source="literature",
+        status=status,
+        documents=deduped,
+        citations=[document.citation for document in deduped],
+        errors=errors,
+    )
+
+
 async def _call_searcher(
     source: str,
     searcher: SearchCallable,
@@ -233,6 +290,24 @@ def _source_limit(source: str, config: SearchConfig, fallback: int) -> int:
         "tavily": config.tavily_max_results,
         "private_corpus": config.private_corpus_max_results,
     }.get(source) or fallback
+
+
+def _config_for_single_source(
+    config: SearchConfig,
+    source: str,
+    *,
+    max_results: int | None,
+) -> SearchConfig:
+    updates = {
+        "pubmed_enabled": source == "pubmed",
+        "semantic_scholar_enabled": source == "semantic_scholar",
+        "arxiv_enabled": source == "arxiv",
+        "tavily_enabled": source == "tavily",
+        "private_corpus_enabled": source == "private_corpus",
+    }
+    if max_results is not None:
+        updates[f"{source}_max_results"] = max_results
+    return config.model_copy(update=updates)
 
 
 def _default_searchers() -> dict[str, SearchCallable]:

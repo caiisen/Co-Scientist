@@ -93,6 +93,13 @@ def test_summarize_hypothesis_strips_wrapping_markdown() -> None:
     )
 
 
+def test_summarize_hypothesis_does_not_truncate_by_default() -> None:
+    text = "Hypothesis: " + " ".join(["selection pressure"] * 30)
+
+    assert "..." not in summarize_hypothesis(text)
+    assert "..." in summarize_hypothesis(text, max_chars=40)
+
+
 def test_parse_observation_verdict_uses_last_verdict() -> None:
     text = """
     Intermediate note: hypothesis: neutral
