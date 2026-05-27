@@ -50,7 +50,7 @@ class ProximityAgent(Agent):
         if missing:
             texts = [_embedding_text(hypothesis) for hypothesis in missing]
             try:
-                vectors = await ctx.llm_for(self.name).embed(texts)
+                vectors = await ctx.embedding_llm_for(self.name).embed(texts)
             except ValueError as exc:
                 if str(exc) != "no embedding model configured for this provider":
                     raise

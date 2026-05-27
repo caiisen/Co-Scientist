@@ -33,6 +33,9 @@ class StaticRouter(LLMRouter):
     def client_for(self, agent=None):
         return self.client
 
+    def embedding_client_for(self, agent=None):
+        return self.client
+
 
 class BucketedGenerationAgent(Agent):
     name = "generation"

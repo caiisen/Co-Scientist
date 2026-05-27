@@ -55,6 +55,9 @@ class StaticRouter(LLMRouter):
     def client_for(self, agent=None):
         return self.client
 
+    def embedding_client_for(self, agent=None):
+        return self.client
+
 
 def make_config(*, max_matches_per_idea: int = 1) -> AppConfig:
     return AppConfig(

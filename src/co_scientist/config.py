@@ -69,6 +69,7 @@ class ProviderConfig(BaseModel):
     embedding_model: str | None = None
     temperature: float = Field(default=0.4, ge=0, le=2)
     max_tokens: int | None = Field(default=4096, gt=0)
+    extra_headers: dict[str, str] = Field(default_factory=dict)
 
     @property
     def resolved_api_key(self) -> str | None:
@@ -97,6 +98,7 @@ class LLMConfig(BaseModel):
     default_provider: str
     providers: dict[str, ProviderConfig]
     agents: dict[str, AgentModelConfig] = Field(default_factory=dict)
+    embedding_provider: str | None = None
 
     @field_validator("providers")
     @classmethod

@@ -64,6 +64,7 @@ class LLMClient:
         self._client = async_client or AsyncOpenAI(
             api_key=provider.resolved_api_key or "missing-api-key",
             base_url=provider.resolved_base_url,
+            default_headers=provider.extra_headers or None,
         )
         self.last_call: LLMCallMetadata | None = None
 
@@ -195,6 +196,20 @@ class LLMRouter:
         if key not in self._clients:
             self._clients[key] = LLMClient(provider)
         return self._clients[key]
+
+    def embedding_client_for(self, agent: str | None = None) -> LLMClient:
+        if self.config.embedding_provider:
+            provider = self.config.providers[self.config.embedding_provider]
+            key = (
+                f"embed:{agent}",
+                provider.chat_model,
+                provider.embedding_model,
+                provider.resolved_base_url,
+            )
+            if key not in self._clients:
+                self._clients[key] = LLMClient(provider)
+            return self._clients[key]
+        return self.client_for(agent)
 
 
 def _validate_ascii_secret(value: str | None, name: str) -> None:

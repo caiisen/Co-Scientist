@@ -50,7 +50,7 @@ class ReflectionAgent(Agent):
             session_id=ctx.session_id,
             persist_citations=False,
             http_session=ctx.http_session,
-            embedding_client=ctx.llm_for(self.name),
+            embedding_client=ctx.embedding_llm_for(self.name),
         )
         prompt = self.render_prompt(
             ctx,

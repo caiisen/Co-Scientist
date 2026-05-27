@@ -40,6 +40,9 @@ class StaticRouter(LLMRouter):
     def client_for(self, agent: str | None = None) -> SequenceClient:
         return self.client
 
+    def embedding_client_for(self, agent: str | None = None) -> SequenceClient:
+        return self.client
+
 
 def make_config(*, initial_ideas: int = 5, max_ideas: int = 5) -> AppConfig:
     return AppConfig(

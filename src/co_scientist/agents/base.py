@@ -32,6 +32,9 @@ class AgentContext:
     def llm_for(self, agent_name: str | None = None) -> LLMClient:
         return self.llm_router.client_for(agent_name)
 
+    def embedding_llm_for(self, agent_name: str | None = None) -> LLMClient:
+        return self.llm_router.embedding_client_for(agent_name)
+
 
 class Agent(ABC):
     name: str
