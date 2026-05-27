@@ -9,13 +9,23 @@ from co_scientist.config import SearchConfig
 from co_scientist.memory.store import SQLiteStore
 from co_scientist.tools.literature import (
     search_literature,
-    search_literature_by_source_queries,
     search_literature_with_fallbacks,
 )
 from co_scientist.tools.models import ToolResult
 from co_scientist.tools.query import build_literature_query
 
 LiteratureSearch = Callable[..., Awaitable[ToolResult]]
+
+
+def _enabled_platforms(cfg: SearchConfig) -> list[str]:
+    mapping = [
+        ("pubmed", cfg.pubmed_enabled),
+        ("arxiv", cfg.arxiv_enabled),
+        ("openalex", cfg.openalex_enabled),
+        ("semantic_scholar", cfg.semantic_scholar_enabled),
+        ("tavily", cfg.tavily_enabled),
+    ]
+    return [name for name, enabled in mapping if enabled]
 
 
 async def search_evidence(
@@ -47,26 +57,24 @@ async def search_evidence(
         )
 
     cfg = config or SearchConfig(max_results=5)
-    if query_client is None or not _source_specific_search_enabled(domain, cfg):
-        return await search_literature_with_fallbacks(
-            queries,
-            domain=domain,
-            max_results=max_results,
-            config=cfg,
-            store=store,
-            session_id=session_id,
-            persist_citations=persist_citations,
-            http_session=http_session,
-            embedding_client=embedding_client,
-        )
 
-    source_queries = await build_source_queries(
-        source_text,
+    # Enhanced path: LLM goal parsing + platform-specific queries + RRF fusion
+    if query_client and source_text:
+        from co_scientist.search import search_for_goal
+        from co_scientist.search.config import SearchConfig as NewSearchConfig
+        from co_scientist.tools.search_adapter import to_tool_result
+
+        new_cfg = NewSearchConfig(
+            enabled_platforms=_enabled_platforms(cfg),
+            max_results_per_query=cfg.max_results,
+            top_k_final=cfg.max_results * 4,
+        )
+        raw = await search_for_goal(source_text, query_client, new_cfg)
+        return to_tool_result(raw)
+
+    # Fallback: no LLM client, use simple lexical search
+    return await search_literature_with_fallbacks(
         queries,
-        query_client=query_client,
-    )
-    return await search_literature_by_source_queries(
-        source_queries,
         domain=domain,
         max_results=max_results,
         config=cfg,

@@ -23,6 +23,7 @@ search:
   pubmed_max_results: 5
   semantic_scholar_max_results: 5
   arxiv_max_results: 5
+  openalex_enabled: true
   private_corpus_enabled: false
   private_corpus_paths: []
   private_corpus_max_results: 3

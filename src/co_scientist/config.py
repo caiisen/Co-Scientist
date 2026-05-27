@@ -39,6 +39,7 @@ class SearchConfig(BaseModel):
     pubmed_max_results: int | None = Field(default=None, gt=0)
     semantic_scholar_max_results: int | None = Field(default=None, gt=0)
     arxiv_max_results: int | None = Field(default=None, gt=0)
+    openalex_enabled: bool = True
     private_corpus_enabled: bool = False
     private_corpus_paths: list[str] = Field(default_factory=list)
     private_corpus_max_results: int = Field(default=3, gt=0)
