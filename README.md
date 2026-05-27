@@ -29,13 +29,19 @@ exported.
 
 ## Features
 
-- OpenAI-compatible LLM client for OpenAI, DeepSeek, Qwen, Kimi, and similar
-  providers.
+- OpenAI-compatible LLM client for OpenAI, DeepSeek, Qwen, Kimi, and any
+  compatible provider; `extra_headers` support for providers that require custom
+  request headers.
+- Dedicated embedding provider: set `llm.embedding_provider` to route embedding
+  calls to a different provider than the chat LLM (e.g. Gitee Qwen3-Embedding
+  while using DeepSeek for chat).
 - Layered YAML configuration: default config, local config, session config, and
   CLI overrides.
 - SQLite context memory for sessions, research plans, hypotheses, reviews,
   matches, tasks, citations, feedback, overview, and private-corpus chunks.
-- Literature tools for PubMed, Semantic Scholar, arXiv, and Tavily web search.
+- Multi-source literature search pipeline — PubMed, Semantic Scholar, arXiv,
+  OpenAlex, and Tavily web search — with per-source enable flags and
+  Reciprocal Rank Fusion result merging.
 - Private literature corpus support for local Markdown/txt directories, with
   chunking, caching, embedding retrieval, and lexical fallback.
 - Elo tournament ranking with automatic pair selection.
@@ -61,6 +67,7 @@ src/co_scientist/
   agents/                   # Generation, Reflection, Ranking, etc.
   llm/                      # OpenAI-compatible client/router
   memory/                   # SQLite schema/store/models/Elo
+  search/                   # Multi-source search pipeline (PubMed, OpenAlex, etc.)
   supervisor/               # Main loop, task queue, stats, metrics
   tools/                    # Literature search, private corpus, tool models
 tests/                      # Unit tests and end-to-end smoke test
@@ -107,24 +114,41 @@ Example:
 ```yaml
 llm:
   default_provider: deepseek
+  # Optional: use a separate provider for embeddings only.
+  # embedding_provider: gitee
   providers:
     deepseek:
-      api_key_env: DEEPSEEK_API_KEY
+      api_key: sk-your-key-here          # direct value
+      # api_key_env: DEEPSEEK_API_KEY    # or read from this env var name
       base_url: https://api.deepseek.com
       chat_model: deepseek-chat
       temperature: 0.3
+    # Example embedding-only provider with a custom request header:
+    # gitee:
+    #   api_key: your-gitee-key
+    #   base_url: https://ai.gitee.com/v1
+    #   chat_model: Qwen3-Embedding-8B
+    #   embedding_model: Qwen3-Embedding-8B
+    #   extra_headers:
+    #     X-Failover-Enabled: "true"
 
 search:
   tavily_enabled: true
   pubmed_enabled: true
   semantic_scholar_enabled: true
   arxiv_enabled: true
+  openalex_enabled: true
   private_corpus_enabled: true
   private_corpus_paths:
     - /absolute/path/to/my/literature-markdown
 ```
 
-Common environment variables:
+**`api_key` vs `api_key_env`**: use `api_key` to embed the key value directly
+in the YAML file (recommended for `local.yaml`, which is git-ignored). Use
+`api_key_env` to name an environment variable that holds the key (e.g.
+`api_key_env: DEEPSEEK_API_KEY` reads `$DEEPSEEK_API_KEY`).
+
+Common environment variables (when using `api_key_env`):
 
 - `OPENAI_API_KEY` / `OPENAI_BASE_URL`
 - `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`
@@ -296,6 +320,8 @@ Completed:
 - Phase 8.3 end-to-end smoke test.
 - Phase 9.2 private literature corpus.
 - Phase 9.3 observability.
+- Multi-source search pipeline with OpenAlex, RRF fusion, and per-source config flags.
+- Dedicated embedding provider support (`llm.embedding_provider`).
 
 Deferred or lower priority:
 

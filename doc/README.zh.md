@@ -25,11 +25,15 @@ Co-Scientist 的核心思想不是让单个 LLM 一次性回答问题，而是�
 
 ## 当前能力
 
-- OpenAI-compatible LLM client，可接 OpenAI、DeepSeek、Qwen、Kimi 等兼容接口。
+- OpenAI-compatible LLM client，可接 OpenAI、DeepSeek、Qwen、Kimi 等兼容接口；
+  支持 `extra_headers`，适配需要自定义请求头的提供商。
+- 独立 embedding 提供商：通过 `llm.embedding_provider` 将 embedding 调用路由到
+  独立的提供商（例如用 Gitee Qwen3-Embedding 做 embedding、DeepSeek 做 chat）。
 - 分层 YAML 配置：默认配置、本地配置、session 配置、CLI 覆盖。
 - SQLite context memory：保存 sessions、research plans、hypotheses、reviews、
   matches、tasks、citations、feedback、overview、private corpus chunks。
-- 文献工具：PubMed、Semantic Scholar、arXiv、Tavily web search。
+- 多源文献检索流水线：PubMed、Semantic Scholar、arXiv、OpenAlex、Tavily web
+  search，支持逐源开关，结果通过 Reciprocal Rank Fusion (RRF) 融合排序。
 - 私有文献库：支持本地 Markdown/txt 目录，自动 chunk、缓存、embedding 检索，
   embedding 失败时降级为关键词检索。
 - Elo 锦标赛：自动选择相近或高价值 hypothesis 对进行比较并更新评分。
@@ -56,6 +60,7 @@ src/co_scientist/
   agents/                   # Generation/Reflection/Ranking/etc.
   llm/                      # OpenAI-compatible client/router
   memory/                   # SQLite schema/store/models/Elo
+  search/                   # 多源检索流水线（PubMed、OpenAlex 等）
   supervisor/               # 主循环、任务队列、stats、metrics
   tools/                    # 文献检索、私有文献库、工具模型
 tests/                      # 单元测试和端到端 smoke test
@@ -102,24 +107,40 @@ cp config/local.yaml.example config/local.yaml
 ```yaml
 llm:
   default_provider: deepseek
+  # 可选：指定独立的 embedding 提供商
+  # embedding_provider: gitee
   providers:
     deepseek:
-      api_key_env: DEEPSEEK_API_KEY
+      api_key: sk-your-key-here          # 直接写 key 值
+      # api_key_env: DEEPSEEK_API_KEY    # 或填写环境变量名
       base_url: https://api.deepseek.com
       chat_model: deepseek-chat
       temperature: 0.3
+    # 示例：仅用于 embedding 的提供商，带自定义请求头
+    # gitee:
+    #   api_key: your-gitee-key
+    #   base_url: https://ai.gitee.com/v1
+    #   chat_model: Qwen3-Embedding-8B
+    #   embedding_model: Qwen3-Embedding-8B
+    #   extra_headers:
+    #     X-Failover-Enabled: "true"
 
 search:
   tavily_enabled: true
   pubmed_enabled: true
   semantic_scholar_enabled: true
   arxiv_enabled: true
+  openalex_enabled: true
   private_corpus_enabled: true
   private_corpus_paths:
     - /absolute/path/to/my/literature-markdown
 ```
 
-常用环境变量：
+**`api_key` 与 `api_key_env` 的区别**：
+- `api_key`：直接在 YAML 中写 key 值，适合写在 `local.yaml`（已被 git 忽略）。
+- `api_key_env`：填写环境变量的**名称**，运行时从环境中读取（如 `api_key_env: DEEPSEEK_API_KEY` 会读取 `$DEEPSEEK_API_KEY`）。
+
+常用环境变量（使用 `api_key_env` 时）：
 
 - `OPENAI_API_KEY` / `OPENAI_BASE_URL`
 - `DEEPSEEK_API_KEY` / `DEEPSEEK_BASE_URL`
@@ -281,6 +302,8 @@ search:
 - Phase 8.3 端到端 smoke test。
 - Phase 9.2 私有文献库。
 - Phase 9.3 可观测性。
+- 多源检索流水线：新增 OpenAlex，支持 RRF 融合与逐源开关。
+- 独立 embedding 提供商支持（`llm.embedding_provider`）。
 
 暂未实现或低优先级：
 
